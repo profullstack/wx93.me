@@ -93,7 +93,13 @@ app.use('*', async (c, next) => {
  * primary host, so it 301s to the same path on wx93.me.
  */
 app.use('*', async (c, next) => {
-  const host = (c.req.header('host') ?? '').toLowerCase().replace(/:\d+$/, '').replace(/^www\./, '');
+  const raw = (c.req.header('host') ?? '').toLowerCase().replace(/:\d+$/, '');
+  // www.wx93.me is an alias: one canonical origin for pages, passkeys and cookies.
+  if (raw === `www.${config.host}`) {
+    const u = new URL(c.req.url);
+    return c.redirect(`${config.siteUrl}${u.pathname}${u.search}`, 301);
+  }
+  const host = raw.replace(/^www\./, '');
   if (!config.altHosts.includes(host)) return next();
   const path = c.req.path;
   if (/^\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\+?$/.test(path) && !RESERVED.has(path.slice(1).replace(/\+$/, '').toLowerCase())) return next();
