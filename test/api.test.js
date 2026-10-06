@@ -240,3 +240,11 @@ d('abuse', () => {
     expect((await req('/healthz')).status).toBe(200);
   });
 });
+
+d('canonical host', () => {
+  test('www on the primary 301s to the apex', async () => {
+    const res = await app.fetch(new Request('http://www.localhost:3999/docs?a=1', { headers: { host: 'www.localhost' } }));
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe(`${SITE}/docs?a=1`);
+  });
+});

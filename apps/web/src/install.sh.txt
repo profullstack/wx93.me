@@ -134,6 +134,14 @@ $HOME/Applications/wx93.app"
   fi
 fi
 
+# The desktop app's Node only counts if it starts here: a box without the GUI
+# libraries Electron links against (a server with DISPLAY forwarded, a minimal
+# container) gets the node/bun shim instead, and the app itself stays installed.
+if [ -n "$RUNTIME" ] && ! ELECTRON_RUN_AS_NODE=1 "$RUNTIME" -e 0 >/dev/null 2>&1; then
+  say "The desktop app cannot start its own Node here (missing system libraries); the CLI will use node or bun."
+  RUNTIME=""
+fi
+
 # --- the CLI: always the newest bundle from the site ---------------------------
 download "$SITE/dl/wx93.mjs" "$WORK/wx93.mjs" || fail "could not download $SITE/dl/wx93.mjs"
 mv "$WORK/wx93.mjs" "$SHARE/cli/wx93.mjs"
