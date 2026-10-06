@@ -1,0 +1,25 @@
+# Self-host wx93: a database and the app. No CoinPay settings, so payments are off
+# and every account is on Free (set the variables in an env file to sell plans).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: wx93
+      POSTGRES_DB: wx93
+    volumes: [wx93-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wx93"]
+      interval: 5s
+      retries: 20
+  web:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      DATABASE_URL: postgres://postgres:wx93@db:5432/wx93
+      SITE_URL: http://localhost:3000
+      ALT_HOSTS: ""
+      AD_PROVIDER: house
+    depends_on:
+      db: { condition: service_healthy }
+volumes:
+  wx93-db:

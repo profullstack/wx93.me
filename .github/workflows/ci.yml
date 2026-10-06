@@ -1,0 +1,38 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wx93_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/wx93_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - name: CLI bundle builds and runs on Node
+        run: |
+          bun run build:cli
+          node apps/web/public/dl/wx93.mjs version
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | timeout 5 node apps/web/public/dl/wx93.mjs mcp | grep -q '"serverInfo"'
+      - name: Installer is valid sh
+        run: bun -e "import('./apps/web/src/install.js').then(m=>Bun.write('/tmp/i.sh', m.installScript()))" && sh -n /tmp/i.sh
+      - name: Docker image builds
+        run: docker build -t wx93:ci .

@@ -1,0 +1,193 @@
+#!/bin/sh
+# wx93 installer: the CLI + TUI (and, on a desktop, the desktop app).
+#
+#   curl -fsSL __SITE__/install | sh
+#
+# Everything lands under your home directory. No root, no sudo, no system files.
+#
+#   sh -s -- --cli-only     never install the desktop app
+#   sh -s -- --desktop      install it even with no desktop session detected
+#   sh -s -- --prefix DIR   install root (default: ~/.local)
+#   sh -s -- --upgrade      same as install: fetch the newest and replace
+#   sh -s -- --uninstall    remove what this installer put in place
+#
+# The CLI is one JavaScript file. It runs on the Node inside the desktop app
+# when that is installed (ELECTRON_RUN_AS_NODE), else on node 20+ or bun, and if
+# the machine has neither it fetches a private copy of bun beside itself.
+set -eu
+
+SITE="${WX93_SITE:-__SITE__}"
+REPO="profullstack/wx93.me"
+PREFIX="${WX93_PREFIX:-$HOME/.local}"
+WANT_DESKTOP=auto
+MODE=install
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --cli-only) WANT_DESKTOP=no ;;
+    --desktop) WANT_DESKTOP=yes ;;
+    --prefix) PREFIX="${2:?--prefix needs a value}"; shift ;;
+    --upgrade|--update|upgrade|update) MODE=install ;;
+    --uninstall|--remove|uninstall|remove) MODE=uninstall ;;
+    -h|--help) sed -n '2,17p' "$0" 2>/dev/null || echo "See $SITE/docs#cli"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 64 ;;
+  esac
+  shift
+done
+
+say() { printf '%s\n' "$*"; }
+fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+SHARE="$PREFIX/share/wx93"
+BIN="$PREFIX/bin"
+
+if [ "$MODE" = uninstall ]; then
+  if [ -x "$SHARE/uninstall.sh" ]; then exec "$SHARE/uninstall.sh"; fi
+  say "wx93 was not installed by this installer (no $SHARE/uninstall.sh)."
+  exit 0
+fi
+
+case "$(uname -s)" in
+  Linux) OS=linux ;;
+  Darwin) OS=mac ;;
+  *) fail "unsupported system $(uname -s). On Windows use: npm i -g @profullstack/wx93" ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) ARCH=x64 ;;
+  arm64|aarch64) ARCH=arm64 ;;
+  *) fail "unsupported architecture $(uname -m)" ;;
+esac
+
+if have curl; then
+  fetch() { curl -fsSL "$1"; }
+  download() { curl -fsSL -o "$2" "$1"; }
+elif have wget; then
+  fetch() { wget -qO- "$1"; }
+  download() { wget -q -O "$2" "$1"; }
+else
+  fail "curl or wget is required"
+fi
+
+has_desktop_session() {
+  [ "$OS" = mac ] && return 0
+  [ -n "${DISPLAY:-}" ] && return 0
+  [ -n "${WAYLAND_DISPLAY:-}" ] && return 0
+  [ -n "${XDG_CURRENT_DESKTOP:-}" ] && return 0
+  return 1
+}
+if [ "$WANT_DESKTOP" = auto ]; then
+  if has_desktop_session; then WANT_DESKTOP=yes; else WANT_DESKTOP=no; fi
+fi
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+mkdir -p "$SHARE/cli" "$BIN"
+PATHS="$BIN/wx93
+$SHARE"
+RUNTIME=""
+
+# --- the desktop app (optional; failure falls back to CLI-only) ---------------
+if [ "$WANT_DESKTOP" = yes ]; then
+  TAG=$(fetch "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1 || true)
+  if [ -z "$TAG" ]; then
+    say "No desktop release published yet; installing the CLI only."
+  elif [ "$OS" = linux ]; then
+    ASSET="wx93-$TAG-linux-$ARCH.tar.gz"
+    if download "https://github.com/$REPO/releases/download/v$TAG/$ASSET" "$WORK/app.tar.gz" 2>/dev/null; then
+      rm -rf "$SHARE/app" && mkdir -p "$SHARE/app"
+      tar -xzf "$WORK/app.tar.gz" -C "$SHARE/app" --strip-components=1
+      RUNTIME="$SHARE/app/wx93-desktop"
+      mkdir -p "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/512x512/apps"
+      [ -f "$SHARE/app/resources/icon.png" ] && cp "$SHARE/app/resources/icon.png" "$PREFIX/share/icons/hicolor/512x512/apps/wx93.png"
+      cat > "$PREFIX/share/applications/wx93.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=wx93
+Comment=Short links for people and agents
+Exec="$RUNTIME" %U
+Icon=wx93
+Terminal=false
+Categories=Network;Utility;
+DESKTOP
+      have update-desktop-database && update-desktop-database "$PREFIX/share/applications" >/dev/null 2>&1 || true
+      PATHS="$PATHS
+$PREFIX/share/applications/wx93.desktop
+$PREFIX/share/icons/hicolor/512x512/apps/wx93.png"
+      say "Desktop app $TAG installed."
+    else
+      say "No $ASSET in release v$TAG; installing the CLI only."
+    fi
+  else
+    ASSET="wx93-$TAG-mac-$ARCH.zip"
+    if have unzip && download "https://github.com/$REPO/releases/download/v$TAG/$ASSET" "$WORK/app.zip" 2>/dev/null; then
+      mkdir -p "$HOME/Applications" && rm -rf "$HOME/Applications/wx93.app"
+      unzip -q "$WORK/app.zip" -d "$HOME/Applications"
+      RUNTIME="$HOME/Applications/wx93.app/Contents/MacOS/wx93"
+      PATHS="$PATHS
+$HOME/Applications/wx93.app"
+      say "Desktop app $TAG installed in ~/Applications."
+    else
+      say "Desktop download unavailable; installing the CLI only."
+    fi
+  fi
+fi
+
+# --- the CLI: always the newest bundle from the site ---------------------------
+download "$SITE/dl/wx93.mjs" "$WORK/wx93.mjs" || fail "could not download $SITE/dl/wx93.mjs"
+mv "$WORK/wx93.mjs" "$SHARE/cli/wx93.mjs"
+
+node_ok() { have node && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 20 ]; }
+if [ -z "$RUNTIME" ] && ! node_ok && ! have bun && [ ! -x "$SHARE/runtime/bun" ]; then
+  have unzip || fail "the CLI needs node 20+ or bun, and unzip to fetch bun. Install one of them, or rerun with --desktop."
+  case "$OS-$ARCH" in
+    linux-x64) B=bun-linux-x64 ;; linux-arm64) B=bun-linux-aarch64 ;;
+    mac-x64) B=bun-darwin-x64 ;; mac-arm64) B=bun-darwin-aarch64 ;;
+  esac
+  say "No node or bun here; fetching a private bun for wx93…"
+  download "https://github.com/oven-sh/bun/releases/latest/download/$B.zip" "$WORK/bun.zip" || fail "could not download bun"
+  unzip -q -o "$WORK/bun.zip" -d "$WORK"
+  mkdir -p "$SHARE/runtime" && mv "$WORK/$B/bun" "$SHARE/runtime/bun" && chmod 0755 "$SHARE/runtime/bun"
+fi
+
+if [ -n "$RUNTIME" ]; then
+  cat > "$BIN/wx93" <<SHIM
+#!/bin/sh
+# wx93 CLI, on the Node inside the wx93 desktop app. Written by $SITE/install.
+ELECTRON_RUN_AS_NODE=1 exec "$RUNTIME" "$SHARE/cli/wx93.mjs" "\$@"
+SHIM
+else
+  cat > "$BIN/wx93" <<SHIM
+#!/bin/sh
+# wx93 CLI. Written by $SITE/install; \`wx93 uninstall\` removes it.
+CLI="$SHARE/cli/wx93.mjs"
+if command -v node >/dev/null 2>&1 && [ "\$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 20 ]; then exec node "\$CLI" "\$@"; fi
+if command -v bun >/dev/null 2>&1; then exec bun "\$CLI" "\$@"; fi
+if [ -x "$SHARE/runtime/bun" ]; then exec "$SHARE/runtime/bun" "\$CLI" "\$@"; fi
+echo "wx93: needs node 20+ or bun; rerun curl -fsSL $SITE/install | sh" >&2
+exit 69
+SHIM
+fi
+chmod 0755 "$BIN/wx93"
+
+{
+  echo '#!/bin/sh'
+  echo "# Removes wx93. Written by $SITE/install, which knew exactly what it created."
+  echo '# Your sign-in and settings in ~/.config/wx93 are kept.'
+  echo 'set -eu'
+  printf '%s\n' "$PATHS" | sed 's|.*|rm -rf "&"|'
+  echo 'echo "wx93 removed. Settings in ${XDG_CONFIG_HOME:-$HOME/.config}/wx93 were kept."'
+} > "$SHARE/uninstall.sh"
+chmod 0755 "$SHARE/uninstall.sh"
+printf '{"installer":"%s/install","installed_at":"%s","desktop":%s}\n' "$SITE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$([ -n "$RUNTIME" ] && echo true || echo false)" > "$SHARE/manifest.json"
+
+VERSION=$("$BIN/wx93" version 2>/dev/null || echo "?")
+say ""
+say "wx93 $VERSION installed: $BIN/wx93"
+case ":$PATH:" in
+  *":$BIN:"*) ;;
+  *) say "Add $BIN to your PATH:  echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.profile && . ~/.profile" ;;
+esac
+say "Next:  wx93 login     then:  wx93 https://example.com/some/long/link"
+say "Also:  wx93 tui · wx93 mcp · wx93 upgrade · wx93 uninstall"

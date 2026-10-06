@@ -1,0 +1,16 @@
+{
+  "name": "wx93.me",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "wx93.me: the agent-native URL shortener. Short links that work with JavaScript off, stats, QR codes, and every surface: web, PWA, REST API, CLI + TUI, MCP and desktop.",
+  "workspaces": ["apps/web", "packages/*"],
+  "scripts": {
+    "dev": "bun run --hot apps/web/src/main.js",
+    "start": "bun apps/web/src/main.js",
+    "test": "bun test",
+    "build:cli": "bun build packages/cli/bin/wx93.mjs --target=node --outfile=apps/web/public/dl/wx93.mjs"
+  },
+  "engines": { "bun": ">=1.3.0" },
+  "packageManager": "bun@1.4.2"
+}

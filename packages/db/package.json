@@ -1,0 +1,13 @@
+{
+  "name": "@wx93/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./migrate": "./src/migrate.js"
+  },
+  "dependencies": {
+    "postgres": "^3.4.7"
+  }
+}

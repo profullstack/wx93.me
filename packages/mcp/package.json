@@ -1,0 +1,32 @@
+{
+  "name": "@profullstack/wx93-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for wx93.me: let any MCP client shorten URLs, list links and read click stats. Same tools as the hosted https://wx93.me/mcp.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Profullstack, Inc.",
+  "homepage": "https://wx93.me/docs#mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/profullstack/wx93.me",
+    "directory": "packages/mcp"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "wx93-mcp": "./bin/wx93-mcp.mjs"
+  },
+  "exports": {
+    ".": "./src/server.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "dependencies": {
+    "@profullstack/wx93": "^0.1.0"
+  },
+  "keywords": ["mcp", "url-shortener", "short-links", "agents", "model-context-protocol"]
+}
