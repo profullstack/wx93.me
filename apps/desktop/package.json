@@ -1,0 +1,34 @@
+{
+  "name": "wx93-desktop",
+  "productName": "wx93",
+  "version": "0.1.0",
+  "description": "wx93 Desktop: your short links in their own window, a menu command that shortens the clipboard, and the wx93 CLI inside, so the terminal needs no Node.",
+  "main": "src/main.cjs",
+  "license": "MIT",
+  "author": "Profullstack, Inc. <hello@profullstack.com>",
+  "homepage": "https://wx93.me",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "me.wx93.desktop",
+    "productName": "wx93",
+    "executableName": "wx93-desktop",
+    "files": ["src/**", "build/icon.png"],
+    "extraResources": [
+      { "from": "../web/public/dl/wx93.mjs", "to": "cli/wx93.mjs" },
+      { "from": "build/icon.png", "to": "icon.png" }
+    ],
+    "protocols": [{ "name": "wx93", "schemes": ["wx93"] }],
+    "linux": { "target": ["tar.gz", "AppImage", "deb"], "category": "Network", "icon": "build/icon.png", "executableName": "wx93-desktop" },
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.productivity", "icon": "build/icon.png" },
+    "win": { "target": ["nsis"], "icon": "build/icon.png" },
+    "artifactName": "wx93-${version}-${os}-${arch}.${ext}"
+  }
+}

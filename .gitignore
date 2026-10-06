@@ -1,0 +1,9 @@
+node_modules
+.env
+*.env
+.DS_Store
+.claude/worktrees/
+apps/desktop/dist
+apps/web/public/dl/
+data/
+*.mmdb
