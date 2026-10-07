@@ -86,7 +86,7 @@ d('anonymous links and how they answer', () => {
     expect(html).toContain('href="https://example.com/a?b=1"');
     expect(html).toContain('class="ad ');
     expect(html).toContain('noindex');
-    expect(html).not.toMatch(/<script(?! src="\/assets\/app\.js")/);
+    expect(html).not.toContain('<script');
   });
   test('HEAD is a redirect too', async () => {
     const res = await req(`/${link.code}`, { method: 'HEAD', headers: { 'user-agent': CHROME } });
