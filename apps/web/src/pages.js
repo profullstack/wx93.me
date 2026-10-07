@@ -49,7 +49,7 @@ ${bare ? '' : nav(user)}
 ${body}
 </main>
 ${bare ? '' : footer()}
-<script src="/assets/app.js" defer></script>
+${bare ? '' : '<script src="/assets/app.js" defer></script>'}
 </body>
 </html>`;
 }
