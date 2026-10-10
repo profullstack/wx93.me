@@ -1,4 +1,5 @@
 import { renderAd } from './ads.js';
+import { siteFooter } from './footer.js';
 import { config, PLANS } from './config.js';
 
 /**
@@ -76,12 +77,8 @@ function footer() {
 <div><b>For agents</b><a href="/llms.txt">llms.txt</a><a href="/docs#x402">x402 pay per call</a><a href="/.well-known/oauth-authorization-server">OAuth 2.1</a><a href="https://github.com/profullstack/wx93.me">Source (MIT)</a></div>
 <div><b>Safety</b><a href="/report">Report a link</a><a href="/docs#abuse">Abuse policy</a><a href="/docs#privacy">Privacy</a></div>
 </div><p class="tiny muted">Country lookups by <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0). Payments in crypto by <a href="https://coinpayportal.com">CoinPay</a>.</p>
-<nav class="webring tiny" aria-label="Profullstack webring">
-  <a href="https://rssamplifier.com/ring/profullstack/previous?from=https%3A%2F%2Fwx93.me%2F" rel="prev" title="Previous site">&lt;&lt;</a>
-  <a href="https://rssamplifier.com/ring/profullstack">Profullstack</a>
-  <a href="https://rssamplifier.com/ring/profullstack/next?from=https%3A%2F%2Fwx93.me%2F" rel="next" title="Next site">&gt;&gt;</a>
-  <a href="https://rssamplifier.com/ring/profullstack/random?from=https%3A%2F%2Fwx93.me%2F" title="Random site" aria-label="Random site">&#x2684;</a>
-</nav></footer>`;
+</footer>
+${siteFooter()}`;
 }
 
 /* ------------------------------------------------------------------ forms -- */

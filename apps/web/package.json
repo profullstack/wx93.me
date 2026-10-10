@@ -19,6 +19,7 @@
     "@simplewebauthn/server": "^13.2.0",
     "hono": "^4.10.3",
     "mmdb-lib": "^3.0.3",
-    "qrcode-generator": "^2.0.4"
+    "qrcode-generator": "^2.0.4",
+    "@profullstack/footer": "latest"
   }
 }
