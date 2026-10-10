@@ -49,13 +49,15 @@ const PUBLIC = join(here, '..', 'public');
 
 /* ------------------------------------------------------------ middleware -- */
 
-const csp = () =>
+/** CrawlProof stats is allowed on the site pages; the interstitial passes tracker=false and stays script-free. */
+const CRAWLPROOF = 'https://crawlproof.com';
+const csp = ({ tracker = true } = {}) =>
   [
     "default-src 'self'",
     "img-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline'",
-    "script-src 'self'",
-    "connect-src 'self'",
+    tracker ? `script-src 'self' ${CRAWLPROOF}` : "script-src 'self'",
+    tracker ? `connect-src 'self' ${CRAWLPROOF}` : "connect-src 'self'",
     `frame-src ${adFrameOrigins().join(' ') || "'none'"}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
@@ -1100,6 +1102,7 @@ app.get('/:code{[A-Za-z0-9][A-Za-z0-9_-]{0,63}\\+?}', async (c) => {
       'cache-control': 'private, no-store',
       vary: 'User-Agent',
       'x-robots-tag': 'noindex',
+      'content-security-policy': csp({ tracker: false }),
     });
   }
   const status = free ? 302 : link.redirect_type;
