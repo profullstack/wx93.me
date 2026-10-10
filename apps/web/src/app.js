@@ -42,6 +42,7 @@ import { qrSvg } from './qr.js';
 import { paidPass, trafficGuard } from './throttle.js';
 import { classify, isPrefetch } from './ua.js';
 import { EVENTS, deliver, forgetHooks, newSecret } from './webhooks.js';
+import { refreshFooter } from './footer.js';
 
 export const app = new Hono();
 const here = dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,17 @@ const csp = ({ tracker = true } = {}) =>
     "form-action 'self' https://coinpayportal.com http://127.0.0.1:* http://localhost:*",
     "object-src 'none'",
   ].join('; ');
+
+// The shared footer's template refreshes from jsDelivr at most hourly. The home
+// page waits for it; every other path (short links above all) refreshes in the
+// background and renders the last good copy, so a redirect never waits on a CDN.
+app.use('*', async (c, next) => {
+  if (c.req.method === 'GET') {
+    const refreshed = refreshFooter();
+    if (c.req.path === '/') await refreshed;
+  }
+  await next();
+});
 
 app.use('*', async (c, next) => {
   await next();
