@@ -979,6 +979,15 @@ app.get('/uninstall.sh', (c) =>
   ),
 );
 
+app.get('/.well-known/openwebring.json', (c) =>
+  c.json({
+    openwebring: '0.1',
+    site: { url: 'https://wx93.me/', name: 'wx93' },
+    made_by: 'both',
+    rings: [{ ring: 'https://rssamplifier.com/ring/profullstack', slug: 'wx93-me' }],
+  }),
+);
+
 app.get('/robots.txt', (c) =>
   c.text(['User-agent: *', 'Allow: /', 'Disallow: /api/', 'Disallow: /account', 'Disallow: /admin', 'Disallow: /oauth/', '', `Sitemap: ${config.siteUrl}/sitemap.xml`, ''].join('\n')),
 );
