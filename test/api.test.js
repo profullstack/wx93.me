@@ -87,6 +87,18 @@ d('anonymous links and how they answer', () => {
     expect(html).toContain('class="ad ');
     expect(html).toContain('noindex');
     expect(html).not.toContain('<script');
+    expect(html).not.toContain('crawlproof');
+    expect(res.headers.get('content-security-policy')).not.toContain('crawlproof.com');
+  });
+  test('site pages carry the CrawlProof stats tag, and the CSP allows it', async () => {
+    for (const path of ['/', '/pricing', '/docs']) {
+      const res = await req(path);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('data-site="1db8465f-dde9-47b1-b898-942367b075ad" src="https://crawlproof.com/stats.js"');
+      const policy = res.headers.get('content-security-policy');
+      expect(policy).toContain("script-src 'self' https://crawlproof.com");
+      expect(policy).toContain("connect-src 'self' https://crawlproof.com");
+    }
   });
   test('HEAD is a redirect too', async () => {
     const res = await req(`/${link.code}`, { method: 'HEAD', headers: { 'user-agent': CHROME } });

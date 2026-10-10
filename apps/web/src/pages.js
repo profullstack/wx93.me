@@ -14,6 +14,13 @@ const money = (cents) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
 const day = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 const num = (n) => Number(n ?? 0).toLocaleString('en-US');
 
+/**
+ * CrawlProof stats, on the regular site pages only. A bare page (the free link's
+ * interstitial) ships no JavaScript at all, so it never gets this tag.
+ */
+export const CRAWLPROOF_TAG =
+  '<script data-site="1db8465f-dde9-47b1-b898-942367b075ad" src="https://crawlproof.com/stats.js" async></script>';
+
 export function layout({ title, description, path, noindex = false, body, user, head = '', bare = false }) {
   const site = config.siteUrl;
   const desc = description ?? 'Short links that work with JavaScript off. Stats, QR codes, custom aliases, and an API, CLI and MCP server for agents.';
@@ -42,6 +49,7 @@ ${path !== undefined ? `<meta property="og:url" content="${e(site)}${e(path)}">`
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/app.css">
 ${head}
+${bare ? '' : CRAWLPROOF_TAG}
 </head>
 <body>
 ${bare ? '' : nav(user)}
