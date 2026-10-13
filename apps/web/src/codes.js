@@ -23,7 +23,7 @@ export const RESERVED = new Set(
   [
     'about', 'account', 'admin', 'api', 'app', 'assets', 'auth', 'billing', 'blog', 'crawl',
     'dashboard', 'desktop', 'dl', 'docs', 'download', 'favicon', 'healthz', 'help', 'icons',
-    'install', 'legal', 'links', 'llms', 'login', 'logout', 'manifest', 'mcp', 'new', 'oauth', 'offline',
+    'install', 'install-mcp', 'legal', 'links', 'llms', 'login', 'logout', 'manifest', 'mcp', 'new', 'oauth', 'offline',
     'pricing', 'privacy', 'qr', 'report', 'robots', 'security', 'settings', 'share', 'signin', 'signout',
     'signup', 'sitemap', 'sitemaps', 'static', 'status', 'support', 'sw', 'terms', 'uninstall',
     'upgrade', 'webhooks', 'well-known', 'www', 'x402',

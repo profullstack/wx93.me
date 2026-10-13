@@ -2,6 +2,15 @@
 
 MCP server for [wx93.me](https://wx93.me): shorten URLs, list links and read click stats from any MCP client.
 
+Install the `wx93-mcp` command (under ~/.local, never sudo; brings its own Node if yours is older
+than 20; remove with `sh ~/.local/share/wx93-mcp/uninstall.sh`):
+
+```sh
+curl -fsSL https://wx93.me/install-mcp | sh
+```
+
+Then point your MCP client at it (`"command": "wx93-mcp"`), or skip the install and let npx run it:
+
 ```json
 { "mcpServers": { "wx93": { "command": "npx", "args": ["-y", "@profullstack/wx93-mcp"] } } }
 ```
