@@ -39,7 +39,8 @@ wx93 login        # OAuth 2.1 + PKCE in the browser (--manual over SSH)
 wx93 ls | wx93 stats launch | wx93 qr launch | wx93 tui
 
 # MCP
-npx -y @profullstack/wx93-mcp                  # stdio, or: wx93 mcp
+curl -fsSL https://wx93.me/install-mcp | sh    # installs the stdio server as wx93-mcp
+npx -y @profullstack/wx93-mcp                  # stdio without installing, or: wx93 mcp
 curl -s https://wx93.me/mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' -H 'content-type: application/json'
 ```
 

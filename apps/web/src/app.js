@@ -982,6 +982,10 @@ mountMcp(app, { caller });
 
 app.get('/install', (c) => c.body(installScript(), 200, { 'content-type': 'text/x-shellscript; charset=utf-8', 'cache-control': 'public, max-age=300' }));
 app.get('/install.sh', (c) => c.body(installScript(), 200, { 'content-type': 'text/x-shellscript; charset=utf-8', 'cache-control': 'public, max-age=300' }));
+// The stdio MCP server's own installer (W3BS catalog): the npm package under ~/.local.
+const MCP_INSTALL = join(here, '..', '..', '..', 'packages', 'mcp', 'install.sh');
+for (const path of ['/install-mcp', '/install-mcp.sh'])
+  app.get(path, (c) => c.body(readFileSync(MCP_INSTALL), 200, { 'content-type': 'text/x-shellscript; charset=utf-8', 'cache-control': 'public, max-age=300' }));
 app.get('/upgrade.sh', (c) => c.body(installScript(), 200, { 'content-type': 'text/x-shellscript; charset=utf-8' }));
 app.get('/uninstall.sh', (c) =>
   c.body(

@@ -201,6 +201,17 @@ describe('outputs', () => {
     writeFileSync(join(dir, 'install.sh'), script);
     execFileSync('sh', ['-n', join(dir, 'install.sh')]);
   });
+  test('the MCP installer is valid sh, never sudo, and its URL is reserved', () => {
+    const file = join(import.meta.dir, '..', 'packages', 'mcp', 'install.sh');
+    const script = Bun.file(file);
+    return script.text().then((text) => {
+      expect(text).toContain('PKG="@profullstack/wx93-mcp"');
+      expect(text).toContain('URL="https://wx93.me/install-mcp"');
+      expect(text).not.toMatch(/(^|[;&|]\s*)sudo\s/m);
+      execFileSync('sh', ['-n', file]);
+      expect(aliasProblem('install-mcp')).toContain('reserved');
+    });
+  });
   test('the CLI parses flags', () => {
     expect(parse(['https://x.example', '--alias', 'a1', '--qr', '--json'])).toEqual({ positional: ['https://x.example'], flags: { alias: 'a1', qr: true, json: true } });
     expect(parse(['stats', 'abc', '--days=7']).flags.days).toBe('7');
