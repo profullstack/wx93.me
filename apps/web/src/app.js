@@ -66,7 +66,7 @@ const csp = ({ tracker = true } = {}) =>
     "object-src 'none'",
   ].join('; ');
 
-// The shared footer's template refreshes from jsDelivr at most hourly. The home
+// The pit.world footer refreshes at most hourly. The home
 // page waits for it; every other path (short links above all) refreshes in the
 // background and renders the last good copy, so a redirect never waits on a CDN.
 app.use('*', async (c, next) => {

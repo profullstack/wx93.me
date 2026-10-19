@@ -1,6 +1,6 @@
 {
   "name": "wx93.me",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "wx93.me: the agent-native URL shortener. Short links that work with JavaScript off, stats, QR codes, and every surface: web, PWA, REST API, CLI + TUI, MCP and desktop.",
