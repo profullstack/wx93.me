@@ -71,12 +71,10 @@ function nav(user) {
 }
 
 function footer() {
-  return `<footer class="foot"><div class="cols">
-<div><a class="brand" href="/"><img src="/logo.svg" alt="" width="22" height="22"><span>wx93</span></a><p class="muted">Short links for people and agents. A <a href="https://profullstack.com">Profullstack</a> product.</p></div>
-<div><b>Product</b><a href="/pricing">Pricing</a><a href="/docs">API</a><a href="/docs#cli">CLI and TUI</a><a href="/docs#mcp">MCP server</a><a href="/desktop">Desktop</a></div>
-<div><b>For agents</b><a href="/llms.txt">llms.txt</a><a href="/docs#x402">x402 pay per call</a><a href="/.well-known/oauth-authorization-server">OAuth 2.1</a><a href="https://github.com/profullstack/wx93.me">Source (MIT)</a></div>
-<div><b>Safety</b><a href="/report">Report a link</a><a href="/docs#abuse">Abuse policy</a><a href="/docs#privacy">Privacy</a></div>
-</div><p class="tiny muted">Country lookups by <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0). Payments in crypto by <a href="https://coinpayportal.com">CoinPay</a>.</p>
+  return `<footer class="foot">
+<p><a class="brand" href="/"><img src="/logo.svg" alt="" width="18" height="18"><span>wx93</span></a> <span class="muted">&copy; ${new Date().getFullYear()} <a href="https://profullstack.com">Profullstack, Inc.</a></span></p>
+<nav><a href="/pricing">Pricing</a><a href="/docs">Docs and API</a><a href="/llms.txt">llms.txt</a><a href="/report">Report a link</a><a href="/docs#abuse">Abuse</a><a href="/docs#privacy">Privacy</a><a href="https://github.com/profullstack/wx93.me">Source</a></nav>
+<p class="tiny muted">Country lookups by <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0).</p>
 </footer>
 ${siteFooter()}`;
 }
