@@ -42,7 +42,6 @@ import { qrSvg } from './qr.js';
 import { paidPass, trafficGuard } from './throttle.js';
 import { classify, isPrefetch } from './ua.js';
 import { EVENTS, deliver, forgetHooks, newSecret } from './webhooks.js';
-import { refreshFooter } from './footer.js';
 import { refreshRingFooter } from './ring-footer.js';
 
 export const app = new Hono();
@@ -67,12 +66,12 @@ const csp = ({ tracker = true } = {}) =>
     "object-src 'none'",
   ].join('; ');
 
-// The webring and pit.world footers refresh at most hourly. The home
+// The webring footer refreshes at most hourly. The home
 // page waits for it; every other path (short links above all) refreshes in the
 // background and renders the last good copy, so a redirect never waits on a CDN.
 app.use('*', async (c, next) => {
   if (c.req.method === 'GET') {
-    const refreshed = Promise.all([refreshRingFooter(), refreshFooter()]);
+    const refreshed = refreshRingFooter();
     if (c.req.path === '/') await refreshed;
   }
   await next();

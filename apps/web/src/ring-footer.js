@@ -1,7 +1,7 @@
 /**
  * The shared Profullstack footer (@profullstack/footer): copyright and the
  * webring nav, from the template published on jsDelivr @latest. It sits under
- * wx93's own footer row and above the pit.world footer.
+ * wx93's own footer row.
  *
  * The page templates are synchronous, so a middleware refreshes the rendered
  * string (footerHtml caches the template for an hour) and the pages read the last
