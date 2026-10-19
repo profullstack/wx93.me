@@ -50,7 +50,10 @@ export function homeAd() {
   return `<aside class="home-ad" data-ad-network="${e(AD_NETWORK.claim)}" data-cp-ad data-slot="${e(AD_NETWORK.slot)}" data-format="banner_300x250" aria-label="Advertisement"><iframe src="${e(src)}" width="300" height="250" loading="lazy" style="border:0" title="Advertisement"></iframe></aside>`;
 }
 
-/** The frame origins the CSP must allow: the home page unit, plus the configured interstitial provider. */
-export function adFrameOrigins() {
-  return ['https://crawlproof.com'];
+/**
+ * The frame origins the CSP must allow. Site pages (`site`) always frame the
+ * home page unit; the interstitial only needs the configured provider.
+ */
+export function adFrameOrigins({ site = false } = {}) {
+  return site || (config.ads.provider === 'crawlproof' && config.ads.crawlproofSlot) ? ['https://crawlproof.com'] : [];
 }
