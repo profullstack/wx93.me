@@ -1,5 +1,6 @@
 import { adNetworkMeta, homeAd, renderAd } from './ads.js';
 import { siteFooter } from './footer.js';
+import { ringFooter } from './ring-footer.js';
 import { config, PLANS } from './config.js';
 
 /**
@@ -72,10 +73,11 @@ function nav(user) {
 
 function footer() {
   return `<footer class="foot">
-<p><a class="brand" href="/"><img src="/logo.svg" alt="" width="18" height="18"><span>wx93</span></a> <span class="muted">&copy; ${new Date().getFullYear()} <a href="https://profullstack.com">Profullstack, Inc.</a></span></p>
+<p><a class="brand" href="/"><img src="/logo.svg" alt="" width="18" height="18"><span>wx93</span></a></p>
 <nav><a href="/pricing">Pricing</a><a href="/docs">Docs and API</a><a href="/llms.txt">llms.txt</a><a href="/report">Report a link</a><a href="/docs#abuse">Abuse</a><a href="/docs#privacy">Privacy</a><a href="https://github.com/profullstack/wx93.me">Source</a></nav>
 <p class="tiny muted">Country lookups by <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0).</p>
 </footer>
+${ringFooter()}
 ${siteFooter()}`;
 }
 
