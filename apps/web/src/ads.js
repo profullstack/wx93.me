@@ -36,7 +36,24 @@ export function renderAd(ctx = {}) {
   return provider(ctx);
 }
 
-/** The frame origins the CSP must allow for the configured provider. */
-export function adFrameOrigins() {
-  return config.ads.provider === 'crawlproof' && config.ads.crawlproofSlot ? ['https://crawlproof.com'] : [];
+/**
+ * Our ad.network publisher unit on the home page. ad.network verifies the site by
+ * finding the claim code in the raw HTML (the unit's attribute and the head meta).
+ * The ad itself is a crawlproof frame, so it needs no script and passes the CSP.
+ */
+export const AD_NETWORK = { claim: '1Y56GiKE8eHj0t06', slot: 'fb195e7b-6641-49cc-8b7c-000647059aa9' };
+
+export const adNetworkMeta = () => `<meta name="ad.network" content="${e(AD_NETWORK.claim)}">`;
+
+export function homeAd() {
+  const src = `https://crawlproof.com/api/ads/frame?slot=${encodeURIComponent(AD_NETWORK.slot)}&format=banner_300x250`;
+  return `<aside class="home-ad" data-ad-network="${e(AD_NETWORK.claim)}" data-cp-ad data-slot="${e(AD_NETWORK.slot)}" data-format="banner_300x250" aria-label="Advertisement"><iframe src="${e(src)}" width="300" height="250" loading="lazy" style="border:0" title="Advertisement"></iframe></aside>`;
+}
+
+/**
+ * The frame origins the CSP must allow. Site pages (`site`) always frame the
+ * home page unit; the interstitial only needs the configured provider.
+ */
+export function adFrameOrigins({ site = false } = {}) {
+  return site || (config.ads.provider === 'crawlproof' && config.ads.crawlproofSlot) ? ['https://crawlproof.com'] : [];
 }

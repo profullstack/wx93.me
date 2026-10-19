@@ -59,7 +59,7 @@ const csp = ({ tracker = true } = {}) =>
     "style-src 'self' 'unsafe-inline'",
     tracker ? `script-src 'self' ${CRAWLPROOF}` : "script-src 'self'",
     tracker ? `connect-src 'self' ${CRAWLPROOF}` : "connect-src 'self'",
-    `frame-src ${adFrameOrigins().join(' ') || "'none'"}`,
+    `frame-src ${adFrameOrigins({ site: tracker }).join(' ') || "'none'"}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self' https://coinpayportal.com http://127.0.0.1:* http://localhost:*",
