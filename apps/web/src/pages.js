@@ -677,7 +677,7 @@ function typeTabs(base, current, { only } = {}) {
       .join('');
   const dyn = group(true);
   const stat = group(false);
-  return `<nav class="tabs" aria-label="Kind of code">${dyn ? `<span class="tabgroup">Dynamic</span>${dyn}` : ''}${stat ? `<span class="tabgroup">Static</span>${stat}` : ''}</nav>`;
+  return `<nav class="tabs" aria-label="Kind of code">${dyn ? `<div class="tabrow"><span class="tabgroup">Dynamic</span>${dyn}</div>` : ''}${stat ? `<div class="tabrow"><span class="tabgroup">Static</span>${stat}</div>` : ''}</nav>`;
 }
 
 /** Hidden copies of a one-off code's fields, so a download button re-sends exactly what was previewed. */
