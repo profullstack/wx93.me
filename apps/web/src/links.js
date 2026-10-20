@@ -126,15 +126,25 @@ export function recordClick(link, info) {
     at: new Date(),
     referrer_host: info.referrerHost?.slice(0, 200) ?? null,
     country: info.country ?? 'XX',
+    city: info.city ?? null,
     device: info.device ?? null,
     browser: info.browser ?? null,
     os: info.os ?? null,
     bot: Boolean(info.bot),
+    source: info.source === 'qr' ? 'qr' : 'link',
+    visitor: info.visitor ?? null,
   });
   if (link.hooks && link.user_id && !info.bot)
     emit(link.user_id, 'link.clicked', {
       link: { id: link.id, code: link.code, url: link.url },
-      click: { at: new Date().toISOString(), country: info.country, device: info.device, referrer_host: info.referrerHost ?? null },
+      click: {
+        at: new Date().toISOString(),
+        source: info.source === 'qr' ? 'qr' : 'link',
+        country: info.country,
+        city: info.city ?? null,
+        device: info.device,
+        referrer_host: info.referrerHost ?? null,
+      },
     });
   if (buffer.length >= 500) void flushClicks();
   else timer ??= setTimeout(() => void flushClicks(), 1000);
@@ -145,12 +155,21 @@ export async function flushClicks() {
   timer = null;
   if (flushing) await flushing;
   if (!buffer.length) return 0;
-  const rows = buffer;
+  let rows = buffer;
   buffer = [];
   flushing = (async () => {
     const sql = db();
+    const cols = ['link_id', 'at', 'referrer_host', 'country', 'city', 'device', 'browser', 'os', 'bot', 'source', 'visitor'];
     try {
-      await sql`insert into clicks ${sql(rows, 'link_id', 'at', 'referrer_host', 'country', 'device', 'browser', 'os', 'bot')}`;
+      try {
+        await sql`insert into clicks ${sql(rows, ...cols)}`;
+      } catch (err) {
+        // A link deleted since its click was queued fails the whole batch; keep everyone else's.
+        if (err?.code !== '23503') throw err;
+        const live = new Set((await sql`select id from links where id = any(${[...new Set(rows.map((r) => r.link_id))]}::uuid[])`).map((r) => r.id));
+        rows = rows.filter((r) => live.has(r.link_id));
+        if (rows.length) await sql`insert into clicks ${sql(rows, ...cols)}`;
+      }
       const counts = new Map();
       for (const r of rows) {
         const c = counts.get(r.link_id) ?? { all: 0, human: 0 };
@@ -200,11 +219,21 @@ export function publicLink(l) {
     disabled: Boolean(l.disabled_at),
     disabled_reason: l.disabled_reason ?? null,
     ad_free: adFree(l),
-    qr_svg: `${config.siteUrl}/qr/${l.code}.svg${l.hostname || l.short_host ? `?domain=${encodeURIComponent(l.hostname ?? l.short_host)}` : ''}`,
+    ...qrUrls(l),
     stats_url: `${config.siteUrl}/api/v1/links/${l.id}/stats`,
     created_at: l.created_at,
   };
 }
+
+/** Where a link's QR code is served, in each format. The code encodes `<short url>?qr` so scans count apart. */
+function qrUrls(l) {
+  const q = l.hostname || l.short_host ? `?domain=${encodeURIComponent(l.hostname ?? l.short_host)}` : '';
+  const at = (ext) => `${config.siteUrl}/qr/${l.code}.${ext}${q}`;
+  return { qr_svg: at('svg'), qr_png: at('png'), qr_pdf: at('pdf') };
+}
+
+/** The text one of our QR codes carries for a link: the short URL, marked as a scan. */
+export const scanUrl = (shortLink) => `${shortLink}?qr`;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -270,30 +299,93 @@ export async function setDisabled(linkId, reason) {
   return row ?? null;
 }
 
-/** Totals, daily series and top lists for one link over `days`. */
-export async function linkStats(linkId, { days = 30, full = true } = {}) {
+export const SOURCES = ['link', 'qr'];
+
+/**
+ * Totals, daily series, top lists and the time views for one link over `days`.
+ *
+ * `source` narrows everything to QR scans ('qr') or plain clicks ('link').
+ * `tz` (an IANA zone) is the clock the hour-of-week heatmap is read in.
+ * Free plans get the totals; `full` adds everything else.
+ */
+export async function linkStats(linkId, { days = 30, full = true, source = null, tz = 'UTC' } = {}) {
   const sql = db();
   const d = Math.min(Math.max(Number(days) || 30, 1), 365);
   const since = new Date(Date.now() - d * 86400_000);
+  const src = SOURCES.includes(source) ? source : null;
+  const where = sql`link_id = ${linkId} and at >= ${since} ${src ? sql`and source = ${src}` : sql``}`;
   const [totals] = await sql`
     select count(*)::int as clicks, count(*) filter (where not bot)::int as humans,
-           count(*) filter (where bot)::int as bots
-    from clicks where link_id = ${linkId} and at >= ${since}`;
-  if (!full) return { days: d, ...totals };
+           count(*) filter (where bot)::int as bots,
+           count(*) filter (where not bot and source = 'qr')::int as scans,
+           count(distinct visitor) filter (where not bot)::int as visitors
+    from clicks where ${where}`;
+  const base = { days: d, source: src, ...totals, unique_rate: totals.humans ? Math.round((1000 * totals.visitors) / totals.humans) / 10 : 0 };
+  if (!full) return base;
+
+  const zone = validTz(tz) ? tz : 'UTC';
   const top = (col) => sql`
     select coalesce(${sql(col)}, 'unknown') as key, count(*)::int as clicks
-    from clicks where link_id = ${linkId} and at >= ${since} and not bot
+    from clicks where ${where} and not bot
     group by 1 order by 2 desc limit 20`;
-  const [daily, referrers, countries, devices, browsers, oses] = await Promise.all([
+  const weekAgo = new Date(Date.now() - 7 * 86400_000);
+  const twoWeeksAgo = new Date(Date.now() - 14 * 86400_000);
+  const hourAgo = new Date(Date.now() - 3600_000);
+  const srcOnly = src ? sql`and source = ${src}` : sql``;
+  const [daily, referrers, countries, cities, devices, browsers, oses, sources, heat, [week], [live], recent] = await Promise.all([
     sql`select to_char(date_trunc('day', at), 'YYYY-MM-DD') as day, count(*)::int as clicks,
-               count(*) filter (where not bot)::int as humans
-        from clicks where link_id = ${linkId} and at >= ${since} group by 1 order by 1`,
+               count(*) filter (where not bot)::int as humans,
+               count(*) filter (where not bot and source = 'qr')::int as scans
+        from clicks where ${where} group by 1 order by 1`,
     sql`select coalesce(referrer_host, 'direct') as key, count(*)::int as clicks
-        from clicks where link_id = ${linkId} and at >= ${since} and not bot group by 1 order by 2 desc limit 20`,
+        from clicks where ${where} and not bot group by 1 order by 2 desc limit 20`,
     top('country'),
+    sql`select city || ', ' || country as key, count(*)::int as clicks
+        from clicks where ${where} and not bot and city is not null group by 1 order by 2 desc limit 20`,
     top('device'),
     top('browser'),
     top('os'),
+    sql`select source as key, count(*)::int as clicks from clicks where ${where} and not bot group by 1 order by 2 desc`,
+    sql`select extract(isodow from at at time zone ${zone})::int as dow, extract(hour from at at time zone ${zone})::int as hour,
+               count(*)::int as clicks
+        from clicks where ${where} and not bot group by 1, 2`,
+    sql`select count(*) filter (where at >= ${weekAgo})::int as this_week,
+               count(*) filter (where at < ${weekAgo})::int as last_week
+        from clicks where link_id = ${linkId} and at >= ${twoWeeksAgo} and not bot ${srcOnly}`,
+    sql`select count(*)::int as last_hour from clicks where link_id = ${linkId} and at >= ${hourAgo} and not bot ${srcOnly}`,
+    sql`select at, source, country, city, device, os, browser, referrer_host
+        from clicks where link_id = ${linkId} and not bot ${srcOnly} order by at desc limit 20`,
   ]);
-  return { days: d, ...totals, daily, referrers, countries, devices, browsers, os: oses };
+  // Monday-first 7 x 24, every cell present, so a client can draw it without filling gaps.
+  const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const h of heat) heatmap[h.dow - 1][h.hour] = h.clicks;
+  return {
+    ...base,
+    tz: zone,
+    daily,
+    referrers,
+    countries,
+    cities,
+    devices,
+    browsers,
+    os: oses,
+    sources,
+    heatmap,
+    week: {
+      this_week: week.this_week,
+      last_week: week.last_week,
+      change_pct: week.last_week ? Math.round((1000 * (week.this_week - week.last_week)) / week.last_week) / 10 : null,
+    },
+    live: { last_hour: live.last_hour, recent },
+  };
+}
+
+export function validTz(tz) {
+  if (!tz || typeof tz !== 'string' || tz.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }

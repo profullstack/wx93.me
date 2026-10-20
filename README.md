@@ -46,6 +46,30 @@ curl -s https://wx93.me/mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' 
 
 Full API: https://wx93.me/docs · machine summary: https://wx93.me/llms.txt
 
+## QR codes
+
+- **Twelve kinds.** Dynamic (a short link underneath, so scans are counted and the
+  content can change after printing): website, contact card, event, link list. The
+  last three get a hosted page with a Save contact / Add to calendar button. Static
+  (the content sits in the code): text, Wi-Fi, email, phone, SMS, WhatsApp, location,
+  crypto payment.
+- **Design.** Colours, eye colour, square/rounded/dot modules, square/rounded/circle
+  eyes, error correction, margin, transparent background, a PNG/JPEG logo. Pairs too
+  low in contrast to scan are refused; every style is tested to decode with ZXing.
+- **Export.** SVG, PNG (rendered by resvg) and vector PDF for print.
+- **Scan analytics.** Codes encode `<short link>?qr`, so scans are counted apart from
+  clicks. Unique visitors (a salted, daily-rotating hash; no address stored), countries
+  and cities (DB-IP Lite), devices, OS, browsers, referrers, a weekday-by-hour heatmap
+  in any time zone, week over week, the last hour and the latest visits.
+- **Everywhere.** `/qr` (no account, nothing saved), `/account/qr`, `/api/v1/qr`,
+  `wx93 qr new|ls|get|edit|stats|rm`, and MCP `create_qr_code` and friends.
+
+```sh
+wx93 qr new wifi ssid=Cafe password=latte --png wifi.png
+wx93 qr new url url=https://example.com/menu --name Menu --dots dots --eye-frame circle --logo logo.png --pdf menu.pdf
+wx93 qr stats <id> --tz America/Los_Angeles
+```
+
 ## How a short link answers
 
 - **Pro / Automation / x402-paid links:** the redirect type the owner chose (302 by
@@ -100,4 +124,4 @@ the logicsrc vault `wx93-me--prod`, never a committed `.env`. Settings:
 Releases: bump `version` in `packages/cli` and `packages/mcp` together and merge;
 `release.yml` publishes both to npm and attaches desktop builds to the GitHub release.
 
-Country lookups by [DB-IP](https://db-ip.com) (CC BY 4.0). MIT licensed.
+Country and city lookups by [DB-IP](https://db-ip.com) (CC BY 4.0). MIT licensed.

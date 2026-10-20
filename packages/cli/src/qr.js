@@ -1,5 +1,8 @@
 import qrcode from 'qrcode-generator';
 
+// The library's Byte mode keeps only the low byte of each character; scanners read UTF-8.
+qrcode.stringToBytes = (s) => Array.from(new TextEncoder().encode(s));
+
 /** A QR code drawn with half-block characters: two modules per terminal row. */
 export function qrTerminal(text, { margin = 2 } = {}) {
   const qr = qrcode(0, 'M');

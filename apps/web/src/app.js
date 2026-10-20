@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { resolveTxt } from 'node:dns/promises';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -14,7 +14,7 @@ import * as auth from './auth.js';
 import { applyPurchase, billingState, currentPlan, quote } from './billing.js';
 import { aliasProblem, CODE_PATH, RESERVED } from './codes.js';
 import { config, PLANS } from './config.js';
-import { clientIp, countryOf } from './geo.js';
+import { clientIp, placeOf } from './geo.js';
 import { installScript } from './install.js';
 import {
   adFree,
@@ -29,6 +29,7 @@ import {
   publicLink,
   recordClick,
   resolve,
+  scanUrl,
   setDisabled,
   shortUrl,
   updateLink,
@@ -38,7 +39,9 @@ import { mountMcp } from './mcp-http.js';
 import { mountOAuth, userFromAccessToken } from './oauth.js';
 import * as P from './pages.js';
 import { codeFrom, HttpError, parseExpiry, parseRedirectType, referrerHost } from './parse.js';
-import { qrSvg } from './qr.js';
+import { contrast, DOTS, ECC, EYES, FORMATS, layoutQr, LOGO_MAX_BYTES, parseStyle, renderQr, sniffLogo } from './qr.js';
+import { encodeStatic, icsText, parseLinkList, parseQrData, QR_TYPES, summary, TYPE_NAMES, vcardText } from './qr-types.js';
+import * as Q from './qrcodes.js';
 import { paidPass, trafficGuard } from './throttle.js';
 import { classify, isPrefetch } from './ua.js';
 import { EVENTS, deliver, forgetHooks, newSecret } from './webhooks.js';
@@ -89,7 +92,7 @@ app.use('*', async (c, next) => {
 });
 
 const guard = trafficGuard();
-for (const p of ['/api/*', '/auth/*', '/oauth/*', '/shorten', '/report', '/mcp', '/billing/*', '/account/*', '/admin/*', '/x402'])
+for (const p of ['/api/*', '/auth/*', '/oauth/*', '/shorten', '/report', '/mcp', '/billing/*', '/account/*', '/admin/*', '/x402', '/qr', '/qr/make.svg', '/qr/make.png', '/qr/make.pdf'])
   app.use(p, guard);
 
 // A cross-site form post cannot ride the Lax session cookie, but say no to a foreign Origin anyway.
@@ -118,7 +121,7 @@ app.use('*', async (c, next) => {
   if (!config.altHosts.includes(host)) return next();
   const path = c.req.path;
   if (/^\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\+?$/.test(path) && !RESERVED.has(path.slice(1).replace(/\+$/, '').toLowerCase())) return next();
-  if (/^\/qr\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.svg$/.test(path) || path === '/robots.txt' || path === '/healthz') return next();
+  if (/^\/qr\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.(svg|png|pdf)$/.test(path) || path === '/robots.txt' || path === '/healthz') return next();
   const u = new URL(c.req.url);
   return c.redirect(`${config.siteUrl}${path}${u.search}`, 301);
 });
@@ -135,6 +138,14 @@ async function caller(c) {
   const u = await auth.userFromSession(getCookie(c, config.session.cookie));
   return u ? { user: u, via: 'session', apiKeyId: null } : { user: null, via: null, apiKeyId: null };
 }
+
+/**
+ * A unique-visitor key: the address and browser, hashed with the server secret
+ * and today's UTC date. Counts people per day; it is not an address, and it
+ * cannot link one person's visits across days.
+ */
+const visitorId = (ip, ua) =>
+  ip ? createHash('sha256').update(`${config.secret}:visitor:${new Date().toISOString().slice(0, 10)}:${ip}:${ua ?? ''}`).digest('hex').slice(0, 16) : null;
 
 const pepper = (s) => createHash('sha256').update(`${config.secret}:${s}`).digest('hex').slice(0, 32);
 const fingerprint = (token) => `x402:${createHash('sha256').update(String(token)).digest('hex').slice(0, 24)}`;
@@ -194,19 +205,7 @@ async function createOne({ who, plan, input, pass, ip }) {
   const redirectType = parseRedirectType(input.redirect_type);
   if (redirectType && redirectType !== 302 && !plan.aliases) requireFeature(plan, 'aliases', 'Redirect types');
 
-  let domainId = null;
-  let hostname = null;
-  let shortHost = null;
-  const wanted = input.domain ? String(input.domain).trim().toLowerCase().replace(/^www\./, '') : '';
-  if (wanted && config.altHosts.includes(wanted)) shortHost = wanted;
-  else if (wanted && wanted !== config.host) {
-    if (!who.user) throw new HttpError(401, 'custom domains need an account');
-    if (!plan.domains) requireFeature(plan, 'domains', 'Custom domains');
-    const [d] = await db()`select id, hostname from domains where user_id = ${who.user.id} and lower(hostname) = ${String(input.domain).toLowerCase()} and verified_at is not null`;
-    if (!d) throw new HttpError(400, `${input.domain} is not a verified domain on your account`);
-    domainId = d.id;
-    hostname = d.hostname;
-  }
+  const { domainId, hostname, shortHost } = await pickDomain(who, plan, input.domain);
 
   const link = await insertLink({
     url,
@@ -224,6 +223,18 @@ async function createOne({ who, plan, input, pass, ip }) {
     ip: ip ? pepper(ip) : null,
   });
   return publicLink({ ...link, hostname, paid: !plan.interstitial });
+}
+
+/** Which host a new link is shown on: ours (wx93.me, 9xq.me) or a verified custom domain. */
+async function pickDomain(who, plan, domain) {
+  const wanted = domain ? String(domain).trim().toLowerCase().replace(/^www\./, '') : '';
+  if (wanted && config.altHosts.includes(wanted)) return { domainId: null, hostname: null, shortHost: wanted };
+  if (!wanted || wanted === config.host) return { domainId: null, hostname: null, shortHost: null };
+  if (!who.user) throw new HttpError(401, 'custom domains need an account');
+  if (!plan.domains) requireFeature(plan, 'domains', 'Custom domains');
+  const [d] = await db()`select id, hostname from domains where user_id = ${who.user.id} and lower(hostname) = ${String(domain).trim().toLowerCase()} and verified_at is not null`;
+  if (!d) throw new HttpError(400, `${domain} is not a verified domain on your account`);
+  return { domainId: d.id, hostname: d.hostname, shortHost: null };
 }
 
 /** Quotas, checked before any work. Returns the plan. */
@@ -509,7 +520,9 @@ app.get('/account/links/:id', async (c) => {
   const link = await ownedLink(user.id, c.req.param('id'));
   if (!link) return c.html(P.Gone({ title: 'No such link', message: 'It is not one of yours, or it was deleted.', user }), 404);
   const plan = await currentPlan(user);
-  return c.html(P.LinkStatsPage({ user, link: publicLink(link), stats: await linkStats(link.id, { days: 30, full: plan.stats }), full: plan.stats }));
+  const query = { days: c.req.query('days') ?? '', tz: c.req.query('tz') ?? '', source: c.req.query('source') ?? '' };
+  const stats = await linkStats(link.id, { days: query.days || 30, full: plan.stats, source: query.source, tz: query.tz || 'UTC' });
+  return c.html(P.LinkStatsPage({ user, link: publicLink(link), stats, full: plan.stats, query }));
 });
 app.post('/account/links/:id/delete', async (c) => {
   const user = await sessionUser(c);
@@ -683,17 +696,18 @@ app.get('/api/v1/links/:ref/stats', async (c) => {
   try {
     const { user, link } = await mine(c);
     const plan = await currentPlan(user);
-    const stats = await linkStats(link.id, { days: c.req.query('days') ?? 30, full: plan.stats });
-    return c.json({ link: publicLink(link), ...stats, ...(plan.stats ? {} : { upgrade: `${config.siteUrl}/pricing`, note: 'Free shows totals; daily, referrers, countries and devices come with Pro.' }) });
+    const stats = await linkStats(link.id, { days: c.req.query('days') ?? 30, full: plan.stats, source: c.req.query('source'), tz: c.req.query('tz') || 'UTC' });
+    return c.json({ link: publicLink(link), ...stats, ...(plan.stats ? {} : { upgrade: `${config.siteUrl}/pricing`, note: 'Free shows totals; daily, referrers, countries, cities, devices, the heatmap and live scans come with Pro.' }) });
   } catch (err) {
     return apiError(c, err);
   }
 });
 
-app.get('/api/v1/links/:ref/qr.svg', async (c) => {
+app.get('/api/v1/links/:ref/:file{qr\\.(svg|png|pdf)}', async (c) => {
   try {
     const { link } = await mine(c);
-    return c.body(qrSvg(publicLink(link).short_url, { size: Number(c.req.query('size')) || 320 }), 200, { 'content-type': 'image/svg+xml' });
+    const saved = await Q.qrForLink(link.id);
+    return await qrImage(c, scanUrl(publicLink(link).short_url), { style: saved?.style, logo: Q.logoOf(saved), format: extOf(c.req.param('file')), name: link.code });
   } catch (err) {
     return apiError(c, err);
   }
@@ -814,6 +828,384 @@ app.delete('/api/v1/domains/:id', async (c) => {
   } catch (err) {
     return apiError(c, err);
   }
+});
+
+/* --------------------------------------------------------------- QR codes -- */
+
+const UPGRADE = () => ({ upgrade: `${config.siteUrl}/pricing` });
+
+/** A style, refusing colours a camera cannot tell apart. */
+function qrStyle(input, base) {
+  const style = parseStyle(input ?? {}, base);
+  if (!style.transparent && contrast(style.fg, style.bg) < 3)
+    throw new HttpError(400, 'the foreground and background are too close to scan; pick colours with more contrast');
+  return style;
+}
+
+/** A JSON body nests data and style; a form sends them flat. */
+const dataFrom = (input) => (input.data && typeof input.data === 'object' ? input.data : input);
+const styleFrom = (input) => (input.style && typeof input.style === 'object' ? input.style : input);
+
+/**
+ * Save a code. A dynamic one gets its own short link: a website's link points at
+ * the site (through every destination check), a hosted page's at /p/<id>.
+ */
+async function createQrCode({ who, plan, input, ip }) {
+  if (!who.user) throw new HttpError(401, `saved QR codes need an account (Free is fine); ${config.siteUrl}/qr makes one-off codes without one`);
+  const type = String(input.type || 'url');
+  if (!QR_TYPES[type]) throw new HttpError(400, `type is one of ${TYPE_NAMES.join(', ')}`);
+  const data = parseQrData(type, dataFrom(input));
+  await checkHostedUrls(type, data);
+  const style = qrStyle(styleFrom(input));
+  const name = String(input.name || summary(type, data) || QR_TYPES[type].label).slice(0, 120);
+  if ((await Q.countQr(who.user.id)) >= plan.qrCodes)
+    throw new HttpError(429, `${plan.name} keeps ${plan.qrCodes.toLocaleString('en-US')} QR codes; delete one or upgrade`, UPGRADE());
+  // A static code that cannot be encoded fails here, before anything is written.
+  if (!QR_TYPES[type].dynamic) layoutQr(encodeStatic(type, data), style);
+
+  const id = randomUUID();
+  let linkId = null;
+  if (QR_TYPES[type].dynamic) {
+    await admit({ who });
+    if (type === 'url') {
+      const link = await createOne({ who, plan, input: { url: data.url, domain: input.domain, alias: input.alias || null, title: name }, ip });
+      linkId = link.id;
+    } else {
+      const { domainId, shortHost } = await pickDomain(who, plan, input.domain);
+      const alias = input.alias ? String(input.alias).trim() : null;
+      if (alias) {
+        requireFeature(plan, 'aliases', 'Custom aliases');
+        const problem = aliasProblem(alias);
+        if (problem) throw new HttpError(400, problem);
+      }
+      const link = await insertLink({
+        url: Q.landingUrl(id),
+        host: config.host,
+        alias,
+        domainId,
+        shortHost,
+        userId: who.user.id,
+        apiKeyId: who.apiKeyId ?? null,
+        title: name,
+        ip: ip ? pepper(ip) : null,
+      });
+      linkId = link.id;
+    }
+  }
+  try {
+    await Q.insertQr({ id, userId: who.user.id, linkId, name, type, data, style });
+  } catch (err) {
+    if (linkId) await db()`delete from links where id = ${linkId}`.catch(() => {});
+    throw err;
+  }
+  return Q.getQr(who.user.id, id, { paid: !plan.interstitial });
+}
+
+/**
+ * A hosted page links out like a short link does, so every URL on it gets the
+ * same destination checks (blocklist, threat feeds, Safe Browsing), not just a
+ * shape check. A website code's URL is checked when its link is made or moved.
+ */
+async function checkHostedUrls(type, data) {
+  if (!['vcard', 'event', 'links'].includes(type)) return;
+  const urls = [data.url, ...(type === 'links' ? parseLinkList(data.links).map((l) => l.url) : [])].filter(Boolean);
+  for (const url of urls) await checkDestination(url);
+}
+
+/** Change a code's name, content or look. Its type is fixed: the printed code depends on it. */
+async function updateQrCode({ plan, row, input, replaceData = false }) {
+  if (input.type && input.type !== row.type) throw new HttpError(400, 'a code keeps its type; make a new one for a different kind');
+  const patch = {};
+  if (input.name !== undefined && String(input.name).trim()) patch.name = String(input.name).trim().slice(0, 120);
+  if (input.data !== undefined || replaceData) {
+    const data = parseQrData(row.type, replaceData ? input : { ...row.data, ...input.data });
+    await checkHostedUrls(row.type, data);
+    if (!row.link_id) layoutQr(encodeStatic(row.type, data), row.style);
+    if (row.type === 'url' && row.link && data.url !== row.data.url) await updateLink(row.link, await checkDestination(data.url));
+    patch.data = data;
+  }
+  if (input.style !== undefined) patch.style = qrStyle(input.style, row.style);
+  if (Object.keys(patch).length) await Q.patchQr(row.id, patch);
+  if (row.link && patch.name) await updateLink(row.link, { title: patch.name });
+  return Q.getQr(row.user_id, row.id, { paid: !plan.interstitial });
+}
+
+const extOf = (file) => file.slice(file.lastIndexOf('.') + 1).toLowerCase();
+
+/** A code as svg, png or pdf. ?size= (pixels; points for pdf); ?download for an attachment. */
+async function qrImage(c, text, { style, logo = null, format, name = 'qr', cache = 'private, max-age=60' }) {
+  const size = c.req.query('size');
+  const bytes = await renderQr(text, { style, logo, format, size: size ? Number(size) : undefined });
+  const headers = { 'content-type': FORMATS[format], 'cache-control': cache };
+  if (c.req.query('download') !== undefined || format === 'pdf')
+    headers['content-disposition'] = `${c.req.query('download') !== undefined ? 'attachment' : 'inline'}; filename="${String(name).replace(/[^\w.-]+/g, '-').slice(0, 60) || 'qr'}.${format}"`;
+  return c.body(bytes, 200, headers);
+}
+
+const myQr = async (c, { logo = false } = {}) => {
+  const who = await requireUser(c);
+  const plan = await currentPlan(who.user);
+  const row = await Q.getQr(who.user.id, c.req.param('id'), { paid: !plan.interstitial, logo });
+  if (!row) throw new HttpError(404, 'no such QR code on your account');
+  return { who, plan, row };
+};
+
+/** Stats for a dynamic code: its link's numbers, every view. */
+async function qrStats(c, row, plan) {
+  if (!row.link_id)
+    return { static: true, note: 'A static code is read by the phone without asking us, so it cannot be counted. Make a dynamic one (website, contact card, event or link list) to count scans.' };
+  const stats = await linkStats(row.link_id, { days: c.req.query('days') ?? 30, full: plan.stats, source: c.req.query('source'), tz: c.req.query('tz') || 'UTC' });
+  return plan.stats ? stats : { ...stats, ...UPGRADE(), note: 'Free shows totals; cities, devices, the hour-of-week heatmap, live scans and week-over-week come with Pro.' };
+}
+
+app.get('/api/v1/qr/types', (c) =>
+  c.json({
+    types: Object.entries(QR_TYPES).map(([key, t]) => ({
+      type: key,
+      label: t.label,
+      dynamic: t.dynamic,
+      hint: t.hint,
+      fields: t.fields.map(([name, label, kind, required]) => ({
+        name,
+        label,
+        kind: Array.isArray(kind) ? 'select' : kind,
+        ...(Array.isArray(kind) ? { options: kind } : {}),
+        required,
+      })),
+    })),
+    style: {
+      fg: '#rrggbb',
+      bg: '#rrggbb',
+      eye: '#rrggbb or null (same as fg)',
+      transparent: 'boolean',
+      dots: DOTS,
+      eye_frame: EYES,
+      eye_ball: EYES,
+      ecc: ECC,
+      margin: '0 to 10 modules',
+    },
+  }),
+);
+
+app.post('/api/v1/qr', async (c) => {
+  try {
+    const who = await requireUser(c);
+    const plan = await currentPlan(who.user);
+    const row = await createQrCode({ who, plan, input: await body(c), ip: clientIp(c.req.raw) });
+    return c.json(Q.publicQr(row), 201);
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+
+app.get('/api/v1/qr', async (c) => {
+  try {
+    const { user } = await requireUser(c);
+    const plan = await currentPlan(user);
+    const rows = await Q.listQr(user.id, { limit: c.req.query('limit'), paid: !plan.interstitial, q: c.req.query('q') });
+    return c.json({ qr_codes: rows.map(Q.publicQr), total: await Q.countQr(user.id), limit: plan.qrCodes });
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+
+app.get('/api/v1/qr/:id{[0-9a-f-]{36}}', async (c) => {
+  try {
+    return c.json(Q.publicQr((await myQr(c)).row));
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+
+app.patch('/api/v1/qr/:id{[0-9a-f-]{36}}', async (c) => {
+  try {
+    const { plan, row } = await myQr(c);
+    return c.json(Q.publicQr(await updateQrCode({ plan, row, input: await body(c) })));
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+
+app.delete('/api/v1/qr/:id{[0-9a-f-]{36}}', async (c) => {
+  try {
+    const { row } = await myQr(c);
+    await Q.removeQr(row);
+    if (row.link) invalidate(row.link.code);
+    return c.json({ deleted: true, id: row.id });
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+
+app.get('/api/v1/qr/:id{[0-9a-f-]{36}}/stats', async (c) => {
+  try {
+    const { plan, row } = await myQr(c);
+    return c.json({ qr: Q.publicQr(row), ...(await qrStats(c, row, plan)) });
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+
+app.get('/api/v1/qr/:id{[0-9a-f-]{36}}/:file{image\\.(svg|png|pdf)}', async (c) => {
+  try {
+    const { row } = await myQr(c, { logo: true });
+    return await qrImage(c, Q.qrText(row), { style: row.style, logo: Q.logoOf(row), format: extOf(c.req.param('file')), name: row.name });
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+
+/** A logo: the raw image as the body, or a multipart field named "logo". */
+async function readLogo(c) {
+  if (Number(c.req.header('content-length') ?? 0) > 2 * LOGO_MAX_BYTES) throw new HttpError(413, `logos are up to ${LOGO_MAX_BYTES / 1024} KB`);
+  if ((c.req.header('content-type') ?? '').includes('multipart/form-data')) {
+    const f = await c.req.parseBody();
+    if (!(f.logo instanceof File) || !f.logo.size) throw new HttpError(400, 'choose a PNG or JPEG file for the logo');
+    return sniffLogo(new Uint8Array(await f.logo.arrayBuffer()));
+  }
+  return sniffLogo(new Uint8Array(await c.req.arrayBuffer()));
+}
+
+for (const method of ['put', 'delete'])
+  app[method]('/api/v1/qr/:id{[0-9a-f-]{36}}/logo', async (c) => {
+    try {
+      const { who, plan, row } = await myQr(c);
+      await Q.setLogo(row.id, method === 'put' ? await readLogo(c) : null);
+      return c.json(Q.publicQr(await Q.getQr(who.user.id, row.id, { paid: !plan.interstitial })));
+    } catch (err) {
+      return apiError(c, err);
+    }
+  });
+
+/* ----- the account's QR pages (forms, no JavaScript) ----- */
+
+async function qrListPage(c, user, extra = {}) {
+  const plan = await currentPlan(user);
+  const [rows, domains] = await Promise.all([
+    Q.listQr(user.id, { limit: 500, paid: !plan.interstitial }),
+    db()`select hostname from domains where user_id = ${user.id} and verified_at is not null order by created_at`,
+  ]);
+  const type = QR_TYPES[extra.type ?? c.req.query('type')] ? (extra.type ?? c.req.query('type')) : 'url';
+  return c.html(P.QrList({ user, plan, codes: rows.map(Q.publicQr), domains: domains.map((d) => d.hostname), ...extra, type }), extra.status ?? 200);
+}
+
+async function qrDetailPage(c, user, id, extra = {}) {
+  const plan = await currentPlan(user);
+  const row = await Q.getQr(user.id, id, { paid: !plan.interstitial });
+  if (!row) return c.html(P.Gone({ title: 'No such QR code', message: 'It is not one of yours, or it was deleted.', user }), 404);
+  const stats = row.link_id ? await qrStats(c, row, plan) : null;
+  const query = { days: c.req.query('days') ?? '', tz: c.req.query('tz') ?? '', source: c.req.query('source') ?? '' };
+  return c.html(P.QrDetail({ user, plan, qr: Q.publicQr(row), stats, query, ...extra }), extra.status ?? 200);
+}
+
+/** A form's error as a flash on the page it came from. */
+const formError = (err) => {
+  if (err instanceof HttpError || err instanceof DestinationError || err instanceof CodeTaken) return { flash: P.e(err.message), status: err.status ?? 400 };
+  throw err;
+};
+
+app.get('/account/qr', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin?next=/account/qr', 302);
+  return qrListPage(c, user);
+});
+app.post('/account/qr', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin?next=/account/qr', 303);
+  const fields = await c.req.parseBody();
+  try {
+    const plan = await currentPlan(user);
+    const row = await createQrCode({ who: { user, apiKeyId: null }, plan, input: fields, ip: clientIp(c.req.raw) });
+    return c.redirect(`/account/qr/${row.id}`, 303);
+  } catch (err) {
+    return qrListPage(c, user, { ...formError(err), values: fields, type: fields.type });
+  }
+});
+app.get('/account/qr/:id{[0-9a-f-]{36}}', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect(`/signin?next=/account/qr/${c.req.param('id')}`, 302);
+  return qrDetailPage(c, user, c.req.param('id'));
+});
+app.post('/account/qr/:id{[0-9a-f-]{36}}/:action{content|style|logo|unlogo|delete}', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin', 303);
+  const id = c.req.param('id');
+  const action = c.req.param('action');
+  const plan = await currentPlan(user);
+  const row = await Q.getQr(user.id, id, { paid: !plan.interstitial });
+  if (!row) return c.redirect('/account/qr', 303);
+  try {
+    if (action === 'delete') {
+      await Q.removeQr(row);
+      if (row.link) invalidate(row.link.code);
+      return c.redirect('/account/qr', 303);
+    }
+    if (action === 'logo') await Q.setLogo(row.id, await readLogo(c));
+    else if (action === 'unlogo') await Q.setLogo(row.id, null);
+    else {
+      const f = await c.req.parseBody();
+      if (action === 'content') await updateQrCode({ plan, row, input: f, replaceData: true });
+      else await updateQrCode({ plan, row, input: { style: f } });
+    }
+    return c.redirect(`/account/qr/${id}#${action === 'content' ? 'content' : 'design'}`, 303);
+  } catch (err) {
+    return qrDetailPage(c, user, id, formError(err));
+  }
+});
+
+/* ----- one-off codes, no account: nothing is saved ----- */
+
+/** Type, data and style from a form or query, and the text the code carries. */
+function oneOff(input) {
+  const type = QR_TYPES[input.type] ? input.type : 'url';
+  const data = parseQrData(type, input);
+  return { type, data, style: qrStyle(input), text: encodeStatic(type, data) };
+}
+
+app.get('/qr', async (c) => {
+  const { user } = await caller(c);
+  const type = QR_TYPES[c.req.query('type')] ? c.req.query('type') : 'url';
+  return c.html(P.QrGenerator({ user, type, values: { type } }));
+});
+// A POST, so a Wi-Fi password never sits in a URL, a history or a log.
+app.post('/qr', async (c) => {
+  const { user } = await caller(c);
+  const f = await c.req.parseBody();
+  const type = QR_TYPES[f.type] ? f.type : 'url';
+  try {
+    const made = oneOff(f);
+    const svg = (await renderQr(made.text, { style: made.style, format: 'svg', size: 280 })).toString();
+    return c.html(P.QrGenerator({ user, type, values: f, preview: svg }), 200, { 'cache-control': 'no-store' });
+  } catch (err) {
+    if (!(err instanceof HttpError || err instanceof DestinationError)) throw err;
+    return c.html(P.QrGenerator({ user, type, values: f, error: err.message }), err.status ?? 400);
+  }
+});
+for (const method of ['get', 'post'])
+  app[method]('/qr/:file{make\\.(svg|png|pdf)}', async (c) => {
+    try {
+      const made = oneOff(method === 'post' ? await body(c) : c.req.query());
+      return await qrImage(c, made.text, { style: made.style, format: extOf(c.req.param('file')), name: `qr-${made.type}`, cache: 'no-store' });
+    } catch (err) {
+      return apiError(c, err);
+    }
+  });
+
+/* ----- the hosted pages behind dynamic codes: a contact card, an event, a link list ----- */
+
+app.get('/p/:file{[0-9a-f-]{36}(\\.(vcf|ics))?}', async (c) => {
+  const [id, ext] = c.req.param('file').split('.');
+  const row = await Q.landingQr(id);
+  const headers = { 'x-robots-tag': 'noindex', 'cache-control': 'private, max-age=60' };
+  if (!row) return c.html(P.Gone({ title: 'Not found', message: 'There is nothing here.' }), 404, headers);
+  if (ext === 'vcf' && row.type === 'vcard') {
+    const file = [row.data.first, row.data.last].filter(Boolean).join('-').replace(/[^\w.-]+/g, '-') || 'contact';
+    return c.body(vcardText(row.data), 200, { ...headers, 'content-type': 'text/vcard; charset=utf-8', 'content-disposition': `attachment; filename="${file}.vcf"` });
+  }
+  if (ext === 'ics' && row.type === 'event')
+    return c.body(icsText(row.data, { uid: row.id }), 200, { ...headers, 'content-type': 'text/calendar; charset=utf-8', 'content-disposition': 'attachment; filename="event.ics"' });
+  if (ext) return c.html(P.Gone({ title: 'Not found', message: 'There is nothing here.' }), 404, headers);
+  return c.html(P.HostedPage({ row, links: row.type === 'links' ? parseLinkList(row.data.links) : [] }), 200, headers);
 });
 
 /* ------------------------------------------------------------------ money -- */
@@ -1015,6 +1407,7 @@ const STATIC_PAGES = [
   ['/', 'daily', '1.0'],
   ['/pricing', 'weekly', '0.8'],
   ['/docs', 'weekly', '0.8'],
+  ['/qr', 'weekly', '0.8'],
   ['/desktop', 'monthly', '0.5'],
   ['/signup', 'monthly', '0.5'],
   ['/report', 'monthly', '0.3'],
@@ -1055,7 +1448,16 @@ POST ${config.siteUrl}/api/v1/links  {"url": "https://...", "alias"?: "...", "ex
 - GET /api/v1/links, GET|PATCH|DELETE /api/v1/links/{id|code}, GET /api/v1/links/{id|code}/stats?days=30
 - POST /api/v1/links/bulk {"links": [...]} (Automation, up to 1,000)
 - GET /api/v1/expand?url=${config.siteUrl}/abc123  (where a link goes, without following it)
-- GET /qr/{code}.svg
+- GET /qr/{code}.svg|.png|.pdf  (a link's QR code; it encodes the short link + "?qr" so scans are counted apart from clicks)
+
+## QR codes (sign in; Free keeps ${PLANS.free.qrCodes}, Pro ${PLANS.pro.qrCodes.toLocaleString('en-US')})
+- Dynamic (counted, editable after printing): url, vcard (contact page), event (calendar page), links (link list). Static: text, wifi, email, phone, sms, whatsapp, geo, crypto.
+- GET /api/v1/qr/types  (every type's fields, and the style options)
+- POST /api/v1/qr {"type": "url", "data": {"url": "https://..."}, "name"?, "style"?: {"fg": "#1d4ed8", "dots": "dots", "eye_frame": "circle", "eye_ball": "circle"}, "domain"?, "alias"?}
+- GET /api/v1/qr, GET|PATCH|DELETE /api/v1/qr/{id}, PUT|DELETE /api/v1/qr/{id}/logo (PNG/JPEG body, 256 KB)
+- GET /api/v1/qr/{id}/image.svg|.png|.pdf?size=  ·  GET /api/v1/qr/{id}/stats?days=30&tz=America/New_York&source=qr|link
+- Stats: scans, unique visitors, countries, cities, devices, OS, browsers, referrers, a 7x24 weekday-by-hour heatmap, week over week, last hour + recent scans.
+- No account: GET|POST /qr/make.svg|.png|.pdf?type=wifi&ssid=...&password=... (static, nothing saved)
 - Two short domains, one namespace: every code works on wx93.me and 9xq.me. Pick the one a link is shown with by "domain": "9xq.me".
 - POST /api/v1/reports {"url", "reason": "phishing|malware|spam|illegal|other"}
 
@@ -1071,17 +1473,17 @@ POST ${config.siteUrl}/api/v1/links  {"url": "https://...", "alias"?: "...", "ex
 
 /* ------------------------------------------------------------- short links -- */
 
-app.get('/qr/:file{[A-Za-z0-9][A-Za-z0-9_-]{0,63}\\.svg}', async (c) => {
-  const code = c.req.param('file').slice(0, -4);
+/** A link's QR code, in its saved design when the link belongs to a saved code. Public: it only holds the short link. */
+app.get('/qr/:file{[A-Za-z0-9][A-Za-z0-9_-]{0,63}\\.(svg|png|pdf)}', async (c) => {
+  const file = c.req.param('file');
+  const code = file.slice(0, file.lastIndexOf('.'));
   const host = c.req.query('domain') || c.req.header('host') || config.host;
   const link = await resolve(host, code);
   if (!link || link.disabled_at) return c.text('no such link', 404);
   const asked = String(c.req.query('domain') ?? '').toLowerCase().replace(/^www\./, '');
   const text = link.hostname ? `https://${link.hostname}/${link.code}` : config.altHosts.includes(asked) ? `https://${asked}/${link.code}` : shortUrl(link);
-  return c.body(qrSvg(text, { size: Number(c.req.query('size')) || 320 }), 200, {
-    'content-type': 'image/svg+xml',
-    'cache-control': 'public, max-age=86400',
-  });
+  const saved = await Q.qrForLink(link.id);
+  return qrImage(c, scanUrl(text), { style: saved?.style, logo: Q.logoOf(saved), format: extOf(file), name: link.code, cache: 'public, max-age=3600' });
 });
 
 /**
@@ -1114,13 +1516,19 @@ app.get('/:code{[A-Za-z0-9][A-Za-z0-9_-]{0,63}\\+?}', async (c) => {
   const free = !adFree(link);
   const interstitial = free && ua.browserLike && c.req.method === 'GET';
   if (c.req.method === 'GET' && !isPrefetch(c.req.raw.headers)) {
+    const ip = clientIp(c.req.raw);
+    const place = placeOf(ip);
     recordClick(link, {
       referrerHost: referrerHost(c.req.header('referer'), config.host),
-      country: countryOf(clientIp(c.req.raw)),
+      country: place.country,
+      city: place.city,
       device: ua.device,
       browser: ua.browser,
       os: ua.os,
       bot: ua.bot,
+      // Our QR codes encode <short url>?qr, so a scan is told apart from a click.
+      source: new URL(c.req.url).searchParams.has('qr') ? 'qr' : 'link',
+      visitor: visitorId(ip, c.req.header('user-agent')),
     });
   }
   if (interstitial) {
