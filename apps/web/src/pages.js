@@ -54,13 +54,13 @@ ${noindex ? '<meta name="robots" content="noindex, nofollow">' : ''}
 <meta property="og:title" content="${e(fullTitle)}">
 <meta property="og:description" content="${e(desc)}">
 ${path !== undefined ? `<meta property="og:url" content="${e(site)}${e(path)}">` : ''}
-<meta property="og:image" content="${e(site)}/icons/og.png">
+<meta property="og:image" content="${e(site)}/icons/og.png?v=2">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon.ico" sizes="32x32">
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/app.css?v=${CSS_V}">
+<link rel="icon" href="${e(site)}/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="${e(site)}/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="${e(site)}/icons/apple-touch-icon.png">
+<link rel="manifest" href="${e(site)}/manifest.webmanifest">
+<link rel="stylesheet" href="${e(site)}/assets/app.css?v=${CSS_V}">
 ${head}
 ${bare ? '' : CRAWLPROOF_TAG}
 </head>
@@ -70,7 +70,7 @@ ${bare ? '' : nav(user)}
 ${body}
 </main>
 ${bare ? '' : footer()}
-${bare ? '' : `<script src="/assets/app.js?v=${JS_V}" defer></script>`}
+${bare ? '' : `<script src="${e(site)}/assets/app.js?v=${JS_V}" defer></script>`}
 </body>
 </html>`;
 }
@@ -491,7 +491,7 @@ export function Interstitial({ link, seconds }) {
     bare: true,
     head: `<meta http-equiv="refresh" content="${seconds};url=${e(dest)}"><meta name="referrer" content="origin">`,
     body: `<section class="interstitial">
-<a class="brand" href="/"><img src="/logo.svg" alt="" width="26" height="26"><span>wx93</span></a>
+<a class="brand" href="${e(config.siteUrl)}/"><img src="${e(config.siteUrl)}/logo.svg" alt="" width="26" height="26"><span>wx93</span></a>
 <p class="eyebrow">You are going to</p>
 <h1 class="desthost">${e(host(dest))}</h1>
 <p class="dest full">${e(dest)}</p>
@@ -499,7 +499,7 @@ export function Interstitial({ link, seconds }) {
 <p class="muted">Continuing in ${seconds} seconds.</p>
 <a class="btn primary big" href="${e(dest)}" rel="nofollow noopener noreferrer">Continue to ${e(host(dest))}</a>
 ${renderAd({ placement: 'interstitial' })}
-<p class="tiny muted">This page keeps free wx93 links free. <a href="/pricing">Pro links skip it.</a> · <a href="/report?code=${e(link.code)}">Report this link</a></p>
+<p class="tiny muted">This page keeps free wx93 links free. <a href="${e(config.siteUrl)}/pricing">Pro links skip it.</a> · <a href="${e(config.siteUrl)}/report?code=${e(link.code)}">Report this link</a></p>
 </section>`,
   });
 }
@@ -514,7 +514,7 @@ export function Preview({ link, user }) {
 <p class="lede">goes to <b>${e(host(link.url))}</b></p>
 <p class="dest full">${e(link.url)}</p>
 <p class="muted">Created ${day(link.created_at)}${link.expires_at ? ` · expires ${day(link.expires_at)}` : ''}</p>
-<div class="row"><a class="btn primary" href="${e(link.url)}" rel="nofollow noopener noreferrer">Go there</a><a class="btn" href="/report?code=${e(link.code)}">Report it</a></div>
+<div class="row"><a class="btn primary" href="${e(link.url)}" rel="nofollow noopener noreferrer">Go there</a><a class="btn" href="${e(config.siteUrl)}/report?code=${e(link.code)}">Report it</a></div>
 <div class="qr"><img src="/qr/${e(link.code)}.svg" alt="QR code" width="160" height="160"></div></section>`,
   });
 }
