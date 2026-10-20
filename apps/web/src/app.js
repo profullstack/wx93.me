@@ -56,12 +56,14 @@ const PUBLIC = join(here, '..', 'public');
 
 /** CrawlProof stats is allowed on the site pages; the interstitial passes tracker=false and stays script-free. */
 const CRAWLPROOF = 'https://crawlproof.com';
+/** Pages served on a second short domain (9xq.me) load their CSS and script from wx93.me. */
+const SITE_ORIGIN = new URL(config.siteUrl).origin;
 const csp = ({ tracker = true } = {}) =>
   [
-    "default-src 'self'",
+    `default-src 'self' ${SITE_ORIGIN}`,
     "img-src 'self' data: https:",
-    "style-src 'self' 'unsafe-inline'",
-    tracker ? `script-src 'self' ${CRAWLPROOF}` : "script-src 'self'",
+    `style-src 'self' ${SITE_ORIGIN} 'unsafe-inline'`,
+    tracker ? `script-src 'self' ${CRAWLPROOF} ${SITE_ORIGIN}` : "script-src 'self'",
     tracker ? `connect-src 'self' ${CRAWLPROOF}` : "connect-src 'self'",
     `frame-src ${adFrameOrigins({ site: tracker }).join(' ') || "'none'"}`,
     "frame-ancestors 'none'",

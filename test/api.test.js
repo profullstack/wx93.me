@@ -126,6 +126,16 @@ d('anonymous links and how they answer', () => {
     expect(made.short_url).toBe(`https://9xq.me/${made.code}`);
     expect((await req(`/${made.code}`, { headers: { 'user-agent': 'curl/8' } })).status).toBe(302);
   });
+  test('a page on the second short domain is branded and styled from wx93.me', async () => {
+    const res = await req(`/${link.code}`, { headers: { host: '9xq.me', 'user-agent': CHROME } });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(`<link rel="stylesheet" href="${SITE}/assets/app.css`);
+    expect(html).toContain(`<meta property="og:image" content="${SITE}/icons/og.png?v=2">`);
+    expect(html).toContain(`<a class="brand" href="${SITE}/">`);
+    expect(html).not.toContain('9xq');
+    expect(res.headers.get('content-security-policy')).toContain(`style-src 'self' ${new URL(SITE).origin}`);
+  });
   test('unknown, expired and bad input', async () => {
     expect((await req('/zzzzzz')).status).toBe(404);
     const bad = await req('/api/v1/links', { method: 'POST', json: { url: 'javascript:alert(1)' } });
