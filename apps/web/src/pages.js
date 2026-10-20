@@ -4,6 +4,15 @@ import { ringFooter } from './ring-footer.js';
 import { config, PLANS } from './config.js';
 import { DEFAULT_STYLE, DOTS, ECC, EYES, layoutQr, parseStyle, renderSvg } from './qr.js';
 import { QR_TYPES } from './qr-types.js';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+
+// Asset URLs carry a content hash so a deploy never pairs new markup with a
+// cached (HTTP or service worker) stylesheet.
+const assetVersion = (file) =>
+  createHash('sha256').update(readFileSync(new URL(`../public/${file}`, import.meta.url))).digest('hex').slice(0, 10);
+const CSS_V = assetVersion('app.css');
+const JS_V = assetVersion('app.js');
 
 /**
  * Server-rendered pages. Everything a visitor needs works with JavaScript off:
@@ -51,7 +60,7 @@ ${path !== undefined ? `<meta property="og:url" content="${e(site)}${e(path)}">`
 <link rel="icon" href="/favicon.ico" sizes="32x32">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/assets/app.css?v=${CSS_V}">
 ${head}
 ${bare ? '' : CRAWLPROOF_TAG}
 </head>
@@ -61,7 +70,7 @@ ${bare ? '' : nav(user)}
 ${body}
 </main>
 ${bare ? '' : footer()}
-${bare ? '' : '<script src="/assets/app.js" defer></script>'}
+${bare ? '' : '<script src="/assets/app.js?v=${JS_V}" defer></script>'}
 </body>
 </html>`;
 }
@@ -674,10 +683,10 @@ function typeTabs(base, current, { only } = {}) {
     Object.entries(QR_TYPES)
       .filter(([, t]) => t.dynamic === dynamic && (!only || only(t)))
       .map(([k, t]) => `<a class="tab${k === current ? ' on' : ''}" href="${base}?type=${k}">${e(t.label)}</a>`)
-      .join('');
+      .join(' ');
   const dyn = group(true);
   const stat = group(false);
-  return `<nav class="tabs" aria-label="Kind of code">${dyn ? `<div class="tabrow"><span class="tabgroup">Dynamic</span>${dyn}</div>` : ''}${stat ? `<div class="tabrow"><span class="tabgroup">Static</span>${stat}</div>` : ''}</nav>`;
+  return `<nav class="tabs" aria-label="Kind of code">${dyn ? `<div class="tabrow"><span class="tabgroup">Dynamic</span> ${dyn}</div>` : ''}${stat ? `<div class="tabrow"><span class="tabgroup">Static</span> ${stat}</div>` : ''}</nav>`;
 }
 
 /** Hidden copies of a one-off code's fields, so a download button re-sends exactly what was previewed. */

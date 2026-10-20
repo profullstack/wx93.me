@@ -1,7 +1,7 @@
 // wx93 service worker. Static assets: cache first, refreshed in the background.
 // Pages: network first, with the last copy (or /offline) when there is no network.
 // Short links and the API are never touched: a redirect must always be live.
-const VERSION = 'wx93-v1';
+const VERSION = 'wx93-v2';
 const ASSETS = ['/assets/app.css', '/assets/app.js', '/logo.svg', '/favicon.svg', '/icons/icon-192.png', '/manifest.webmanifest', '/offline'];
 const PAGES = ['/', '/pricing', '/docs', '/account', '/signin', '/signup', '/desktop', '/offline'];
 
