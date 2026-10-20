@@ -45,6 +45,7 @@ export const PLANS = {
     bulk: false,
     webhooks: false,
     domains: 0,
+    qrCodes: 10,
   },
   pro: {
     name: 'Pro',
@@ -58,6 +59,7 @@ export const PLANS = {
     bulk: false,
     webhooks: false,
     domains: 0,
+    qrCodes: 1_000,
   },
   automation: {
     name: 'Automation',
@@ -71,6 +73,7 @@ export const PLANS = {
     bulk: true,
     webhooks: true,
     domains: 5,
+    qrCodes: 100_000,
   },
 };
 
@@ -183,6 +186,10 @@ export const config = {
   /** DB-IP Lite country database (CC BY 4.0), baked into the image. */
   get geoipPath() {
     return env('GEOIP_DB', '/app/data/dbip-country-lite.mmdb');
+  },
+  /** DB-IP Lite city database: used instead of the country one when present (it carries the country too). */
+  get geoipCityPath() {
+    return env('GEOIP_CITY_DB', '/app/data/dbip-city-lite.mmdb');
   },
   coinpay: {
     get enabled() {

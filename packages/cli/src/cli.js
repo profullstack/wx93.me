@@ -22,8 +22,16 @@ const HELP = `wx93: short links for people and agents (https://wx93.me)
   wx93 login --key wx93_live_…   or use an API key from wx93.me/account
   wx93 logout | whoami
   wx93 ls [--limit N] [--q TEXT] your links
-  wx93 stats CODE [--days 30]    clicks, referrers, countries, devices
+  wx93 stats CODE [--days 30] [--tz ZONE] [--source qr|link]
+                                 clicks, scans, unique visitors, countries, cities, devices
   wx93 get CODE | rm CODE | qr CODE|URL | expand URL
+  wx93 qr new TYPE key=value… [--name N] [--png|--svg|--pdf FILE] [--logo FILE] [style]
+                                 a saved QR code (wx93 qr types lists TYPE and its keys)
+  wx93 qr ls | qr get ID [--png|--svg|--pdf FILE] [--size N] | qr rm ID
+  wx93 qr edit ID key=value… [--name N] [--logo FILE | --no-logo] [style]
+  wx93 qr stats ID [--days 30] [--tz Europe/Berlin] [--source qr|link]
+    style: --fg '#1d4ed8' --bg '#fff' --eye '#db2777' --dots square|rounded|dots
+           --eye-frame square|rounded|circle --eye-ball square|rounded|circle --ecc L|M|Q|H
   wx93 edit CODE [--url U] [--title T] [--expires 7d] [--redirect 301]
   wx93 bulk FILE|-               one URL per line (Automation)
   wx93 keys [create NAME | revoke ID]
@@ -125,16 +133,10 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
     case 'stats': {
-      const s = await api.stats(auth, need(rest[0], 'wx93 stats CODE'), { days: flags.days });
+      const s = await api.stats(auth, need(rest[0], 'wx93 stats CODE'), { days: flags.days, tz: flags.tz, source: flags.source });
       if (json) return out(s), 0;
       console.log(`${s.link.short_url} -> ${s.link.url}`);
-      console.log(`last ${s.days} days: ${s.humans} people, ${s.bots} bots`);
-      for (const k of ['referrers', 'countries', 'devices', 'browsers']) {
-        if (!s[k]?.length) continue;
-        console.log(`\n${k}`);
-        for (const r of s[k].slice(0, 8)) console.log(`  ${String(r.clicks).padStart(6)}  ${r.key}`);
-      }
-      if (s.note) say(`\n${s.note}`);
+      printStats(s);
       return 0;
     }
     case 'edit': {
@@ -153,13 +155,8 @@ export async function main(argv = process.argv.slice(2)) {
       out(r, `deleted ${r.code}`);
       return 0;
     }
-    case 'qr': {
-      const target = need(rest[0], 'wx93 qr CODE|URL');
-      const url = /^https?:\/\//.test(target) ? target : `${auth.server}/${target}`;
-      console.log(qrTerminal(url));
-      console.log(url);
-      return 0;
-    }
+    case 'qr':
+      return qrCommand(auth, rest, flags, { json, out });
     case 'expand': {
       const r = await api.expand(auth, need(rest[0], 'wx93 expand URL'));
       out(r, r.disabled ? `${r.code}: removed` : r.expired ? `${r.code}: expired (${r.url})` : r.url);
@@ -235,4 +232,136 @@ export async function main(argv = process.argv.slice(2)) {
 function need(v, usage) {
   if (!v) throw new Error(`usage: ${usage}`);
   return v;
+}
+
+/* ---------------------------------------------------------------- QR codes -- */
+
+const STYLE_FLAGS = { fg: 'fg', bg: 'bg', eye: 'eye', dots: 'dots', 'eye-frame': 'eye_frame', 'eye-ball': 'eye_ball', ecc: 'ecc', margin: 'margin', transparent: 'transparent' };
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const SHADES = ' ░▒▓█';
+
+function styleFlags(flags) {
+  const style = {};
+  for (const [flag, key] of Object.entries(STYLE_FLAGS)) if (flags[flag] !== undefined) style[key] = flags[flag];
+  return Object.keys(style).length ? style : undefined;
+}
+
+/** key=value pairs; the value keeps any later "=" (URLs have them). */
+function pairs(list) {
+  const data = {};
+  for (const item of list) {
+    const at = item.indexOf('=');
+    if (at < 1) throw new Error(`expected key=value, got "${item}" (wx93 qr types lists the keys)`);
+    data[item.slice(0, at)] = item.slice(at + 1);
+  }
+  return data;
+}
+
+const IMAGE_FLAGS = ['png', 'svg', 'pdf'];
+
+async function saveImages(auth, id, flags) {
+  const { writeFile } = await import('node:fs/promises');
+  for (const f of IMAGE_FLAGS) {
+    if (typeof flags[f] !== 'string') continue;
+    await writeFile(flags[f], await api.qrImage(auth, id, f, { size: flags.size }));
+    say(`wrote ${flags[f]}`);
+  }
+}
+
+async function logoFlag(auth, id, flags) {
+  if (flags['no-logo']) return api.removeQrLogo(auth, id);
+  if (typeof flags.logo !== 'string') return null;
+  const data = await readFile(flags.logo);
+  return api.setQrLogo(auth, id, data, /\.jpe?g$/i.test(flags.logo) ? 'image/jpeg' : 'image/png');
+}
+
+const qrLine = (q) => `${q.id}  ${q.type.padEnd(8)} ${q.dynamic ? String(q.scans).padStart(6) : '     -'}  ${q.name}${q.short_url ? `  ${q.short_url}` : ''}`;
+
+function printStats(s) {
+  console.log(`last ${s.days} days: ${s.humans} people, ${s.scans ?? 0} QR scans, ${s.visitors ?? 0} unique, ${s.bots} bots`);
+  if (s.week) console.log(`this week ${s.week.this_week} (${s.week.change_pct === null ? 'new' : `${s.week.change_pct > 0 ? '+' : ''}${s.week.change_pct}%`}) · last hour ${s.live.last_hour}`);
+  for (const k of ['sources', 'countries', 'cities', 'devices', 'os', 'browsers', 'referrers']) {
+    if (!s[k]?.length) continue;
+    console.log(`\n${k}`);
+    for (const r of s[k].slice(0, 8)) console.log(`  ${String(r.clicks).padStart(6)}  ${r.key}`);
+  }
+  if (s.heatmap) {
+    const peak = Math.max(1, ...s.heatmap.flat());
+    console.log(`\nwhen (${s.tz})\n      0     6     12    18`);
+    s.heatmap.forEach((row, d) => console.log(`  ${DAYS[d]} ${row.map((n) => (n ? SHADES[Math.max(1, Math.ceil((4 * n) / peak))] : '·')).join('')}`));
+  }
+  if (s.note) say(`\n${s.note}`);
+}
+
+async function qrCommand(auth, rest, flags, { json, out }) {
+  const [sub, ...args] = rest;
+  switch (sub) {
+    case 'types': {
+      const t = await api.qrTypes(auth);
+      out(t, t.types.map((x) => `${x.type.padEnd(9)} ${x.dynamic ? 'dynamic' : 'static '}  ${x.fields.map((f) => `${f.name}${f.required ? '*' : ''}`).join(' ')}`).join('\n'));
+      return 0;
+    }
+    case 'new':
+    case 'create': {
+      const type = need(args[0], 'wx93 qr new TYPE key=value…');
+      const input = { type, data: pairs(args.slice(1)), style: styleFlags(flags) };
+      for (const k of ['name', 'domain', 'alias']) if (typeof flags[k] === 'string') input[k] = flags[k];
+      let q = await api.createQr(auth, input);
+      if (flags.logo) q = await logoFlag(auth, q.id, flags);
+      await saveImages(auth, q.id, flags);
+      out(q, `${q.id}\n${q.short_url ?? q.encodes}`);
+      if (!json && !IMAGE_FLAGS.some((f) => flags[f])) console.log(qrTerminal(q.encodes));
+      return 0;
+    }
+    case 'ls':
+    case 'list': {
+      const r = await api.listQr(auth, { limit: flags.limit, q: flags.q });
+      out(r.qr_codes, r.qr_codes.map(qrLine).join('\n') || 'No QR codes yet.');
+      if (!json) say(`${r.total} of ${r.limit}`);
+      return 0;
+    }
+    case 'get':
+    case 'show': {
+      const q = await api.getQr(auth, need(args[0], 'wx93 qr get ID'));
+      await saveImages(auth, q.id, flags);
+      out(q, `${qrLine(q)}\nencodes ${q.encodes}`);
+      if (!json && !IMAGE_FLAGS.some((f) => flags[f])) console.log(qrTerminal(q.encodes));
+      return 0;
+    }
+    case 'edit': {
+      const id = need(args[0], 'wx93 qr edit ID key=value…');
+      const patch = {};
+      if (args.length > 1) patch.data = pairs(args.slice(1));
+      if (typeof flags.name === 'string') patch.name = flags.name;
+      const style = styleFlags(flags);
+      if (style) patch.style = style;
+      let q = Object.keys(patch).length ? await api.updateQr(auth, id, patch) : await api.getQr(auth, id);
+      q = (await logoFlag(auth, id, flags)) ?? q;
+      await saveImages(auth, id, flags);
+      out(q, qrLine(q));
+      return 0;
+    }
+    case 'stats': {
+      const s = await api.qrStats(auth, need(args[0], 'wx93 qr stats ID'), { days: flags.days, tz: flags.tz, source: flags.source });
+      if (json) return out(s), 0;
+      console.log(qrLine(s.qr));
+      if (s.static) say(s.note);
+      else printStats(s);
+      return 0;
+    }
+    case 'rm':
+    case 'delete': {
+      const r = await api.deleteQr(auth, need(args[0], 'wx93 qr rm ID'));
+      out(r, `deleted ${r.id}`);
+      return 0;
+    }
+    default: {
+      // wx93 qr CODE|URL: any link's code, in the terminal.
+      const target = need(sub, 'wx93 qr CODE|URL');
+      const url = /^https?:\/\//.test(target) ? target : `${auth.server}/${target}`;
+      console.log(qrTerminal(url));
+      console.log(url);
+      return 0;
+    }
+  }
 }

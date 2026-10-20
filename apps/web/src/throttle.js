@@ -56,6 +56,8 @@ function build() {
       { path: '/api/v1/links', limit: config.links.anonPerHour, windowSeconds: 3600, credential: { limit: 1200, ceiling: 2400 } },
       { path: '/shorten', limit: config.links.anonPerHour, windowSeconds: 3600 },
       { path: '/api/v1/links/bulk', limit: 60, windowSeconds: 3600 },
+      // One-off QR images are drawn per request (PNG and PDF are real work): an hour's allowance, more when signed in.
+      ...['svg', 'png', 'pdf'].map((ext) => ({ path: `/qr/make.${ext}`, limit: 120, windowSeconds: 3600, credential: { limit: 1200, ceiling: 2400 } })),
       // Brute-force and mail-bomb shaped routes stay per-address whatever they present.
       { path: '/auth/', limit: 10, credential: false },
       { path: '/api/v1/reports', limit: 10, windowSeconds: 3600, credential: false },

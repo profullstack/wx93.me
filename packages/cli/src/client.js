@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createTokenStore, getAccessToken } from '@profullstack/auth-system/cli';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const DEFAULT_SERVER = 'https://wx93.me';
 export const CONFIG_FILE = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'wx93', 'config.json');
 
@@ -64,10 +64,13 @@ export class ApiError extends Error {
   }
 }
 
-/** auth.fetch lets the hosted MCP endpoint call the app in-process instead of over the network. */
-export async function call(auth, path, init = {}) {
+/**
+ * auth.fetch lets the hosted MCP endpoint call the app in-process instead of over the network.
+ * Paths are under /api/v1 unless `root: true`.
+ */
+function request(auth, path, { root = false, ...init } = {}) {
   const doFetch = auth.fetch ?? fetch;
-  const res = await doFetch(`${auth.server}${path.startsWith('/qr/') ? '' : '/api/v1'}${path}`, {
+  return doFetch(`${auth.server}${root ? '' : '/api/v1'}${path}`, {
     ...init,
     headers: {
       'user-agent': `wx93-cli/${VERSION}`,
@@ -79,10 +82,24 @@ export async function call(auth, path, init = {}) {
       ...(init.headers ?? {}),
     },
   });
+}
+
+export async function call(auth, path, init = {}) {
+  const res = await request(auth, path, init);
   const type = res.headers.get('content-type') ?? '';
   const body = type.includes('json') ? await res.json().catch(() => ({})) : await res.text();
   if (!res.ok) throw new ApiError(res.status, typeof body === 'string' ? { error: body.slice(0, 300) } : body);
   return body;
+}
+
+/** A binary answer (a QR image) as a Buffer. */
+export async function bytes(auth, path, init = {}) {
+  const res = await request(auth, path, init);
+  if (!res.ok) {
+    const type = res.headers.get('content-type') ?? '';
+    throw new ApiError(res.status, type.includes('json') ? await res.json().catch(() => ({})) : { error: (await res.text()).slice(0, 300) });
+  }
+  return Buffer.from(await res.arrayBuffer());
 }
 
 const post = (body, method = 'POST') => ({ method, body: JSON.stringify(body ?? {}) });
@@ -98,10 +115,23 @@ export const list = (auth, { limit, before, q } = {}) => call(auth, `/links?${qs
 export const getLink = (auth, r) => call(auth, `/links/${ref(r)}`);
 export const updateLink = (auth, r, patch) => call(auth, `/links/${ref(r)}`, post(patch, 'PATCH'));
 export const deleteLink = (auth, r) => call(auth, `/links/${ref(r)}`, { method: 'DELETE' });
-export const stats = (auth, r, { days } = {}) => call(auth, `/links/${ref(r)}/stats?${qs({ days })}`);
+export const stats = (auth, r, { days, tz, source } = {}) => call(auth, `/links/${ref(r)}/stats?${qs({ days, tz, source })}`);
 export const expand = (auth, url) => call(auth, `/expand?${qs({ url })}`);
 export const keys = (auth) => call(auth, '/keys');
 export const createKey = (auth, name) => call(auth, '/keys', post({ name }));
 export const revokeKey = (auth, id) => call(auth, `/keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
 export const checkout = (auth, plan, term, chain) => call(auth, '/billing/checkout', post({ plan, term, chain }));
 export const report = (auth, body) => call(auth, '/reports', post(body));
+
+const qrId = (id) => encodeURIComponent(String(id));
+export const qrTypes = (auth) => call(auth, '/qr/types');
+export const createQr = (auth, input) => call(auth, '/qr', post(input));
+export const listQr = (auth, { limit, q } = {}) => call(auth, `/qr?${qs({ limit, q })}`);
+export const getQr = (auth, id) => call(auth, `/qr/${qrId(id)}`);
+export const updateQr = (auth, id, patch) => call(auth, `/qr/${qrId(id)}`, post(patch, 'PATCH'));
+export const deleteQr = (auth, id) => call(auth, `/qr/${qrId(id)}`, { method: 'DELETE' });
+export const qrStats = (auth, id, { days, tz, source } = {}) => call(auth, `/qr/${qrId(id)}/stats?${qs({ days, tz, source })}`);
+export const qrImage = (auth, id, format = 'png', { size } = {}) => bytes(auth, `/qr/${qrId(id)}/image.${format}?${qs({ size })}`);
+export const setQrLogo = (auth, id, data, type) =>
+  call(auth, `/qr/${qrId(id)}/logo`, { method: 'PUT', body: data, headers: { 'content-type': type } });
+export const removeQrLogo = (auth, id) => call(auth, `/qr/${qrId(id)}/logo`, { method: 'DELETE' });

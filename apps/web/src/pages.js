@@ -2,6 +2,8 @@ import { adNetworkMeta, homeAd, renderAd } from './ads.js';
 import { siteFooter } from './footer.js';
 import { ringFooter } from './ring-footer.js';
 import { config, PLANS } from './config.js';
+import { DEFAULT_STYLE, DOTS, ECC, EYES, layoutQr, parseStyle, renderSvg } from './qr.js';
+import { QR_TYPES } from './qr-types.js';
 
 /**
  * Server-rendered pages. Everything a visitor needs works with JavaScript off:
@@ -66,7 +68,7 @@ ${bare ? '' : '<script src="/assets/app.js" defer></script>'}
 
 function nav(user) {
   return `<header class="nav"><a class="brand" href="/" aria-label="wx93 home"><img src="/logo.svg" alt="" width="28" height="28"><span>wx93</span></a>
-<nav><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/docs#cli">CLI</a>${
+<nav><a href="/qr">QR codes</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/docs#cli">CLI</a>${
     user ? `<a class="btn small" href="/account">Account</a>` : `<a href="/signin">Sign in</a><a class="btn small primary" href="/signup">Sign up</a>`
   }</nav></header>`;
 }
@@ -74,8 +76,8 @@ function nav(user) {
 function footer() {
   return `<footer class="foot">
 <p><a class="brand" href="/"><img src="/logo.svg" alt="" width="18" height="18"><span>wx93</span></a></p>
-<nav><a href="/pricing">Pricing</a><a href="/docs">Docs and API</a><a href="/llms.txt">llms.txt</a><a href="/report">Report a link</a><a href="/docs#abuse">Abuse</a><a href="/docs#privacy">Privacy</a><a href="https://github.com/profullstack/wx93.me">Source</a></nav>
-<p class="tiny muted">Country lookups by <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0).</p>
+<nav><a href="/qr">QR code generator</a><a href="/pricing">Pricing</a><a href="/docs">Docs and API</a><a href="/llms.txt">llms.txt</a><a href="/report">Report a link</a><a href="/docs#abuse">Abuse</a><a href="/docs#privacy">Privacy</a><a href="https://github.com/profullstack/wx93.me">Source</a></nav>
+<p class="tiny muted">Country and city lookups by <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0).</p>
 </footer>
 ${ringFooter()}
 ${siteFooter()}`;
@@ -150,7 +152,7 @@ export function ShortenResult({ link, user, guardFields, plan, notice }) {
 <div class="row"><input class="copyfield" readonly value="${e(short)}" aria-label="Short link"><button class="btn copy" data-copy="${e(short)}" type="button">Copy</button></div>
 <p class="muted">Points to <span class="dest">${e(link.url)}</span></p>
 ${notice ? `<p class="hint">${notice}</p>` : ''}
-<div class="qr"><img src="${e(link.qr_svg)}" alt="QR code for ${e(short)}" width="220" height="220"><a class="btn small" href="${e(link.qr_svg)}" download="${e(link.code)}.svg">Download QR (SVG)</a></div>
+<div class="qr"><img src="${e(link.qr_svg)}" alt="QR code for ${e(short)}" width="220" height="220"><div class="stack">${qrDownloads(link)}${user ? '<a class="tiny" href="/account/qr">Colours, a logo and scan stats: save it as a QR code</a>' : ''}</div></div>
 <h2>Another one</h2>
 ${shortenForm({ guardFields, user, plan })}
 </section>`,
@@ -186,13 +188,16 @@ ${card('free', 'Short links for anyone, no account needed.', [
   'Random short codes, QR codes, expiry',
   'Opens through a 5 second ad page (people only; bots and previews go straight through)',
   `${num(PLANS.free.linksPerMonth)} links a month with an account, ${config.links.anonPerHour} an hour without`,
-  'Total click count',
+  'Total clicks, QR scans and unique visitors',
+  `${num(PLANS.free.qrCodes)} saved QR codes: colours, dot and eye shapes, logos, PNG, SVG and PDF`,
   'CLI, TUI and MCP for creating links',
 ])}
 ${card('pro', 'Clean links and real numbers, for a person or a small team.', [
   'No ad page: every click goes straight through',
   'Custom aliases (wx93.me/your-name) and 301, 302, 307 or 308',
-  'Full stats: daily clicks, referrers, countries, devices, browsers',
+  'Full stats: daily, referrers, countries, cities, devices, OS, browsers',
+  'QR scan analytics: weekday-by-hour heatmap, week over week, live scans',
+  `${num(PLANS.pro.qrCodes)} saved QR codes`,
   'API keys (God Mode) and the full REST API',
   `${num(PLANS.pro.linksPerMonth)} links a month`,
 ])}
@@ -266,6 +271,27 @@ export function Docs({ user }) {
 <li>Add <code>+</code> to any link (<code>wx93.me/abc123+</code>) to see where it goes without going there.</li>
 </ul>
 
+<h2 id="qr">QR codes</h2>
+<p>Every link has a QR code at <code>/qr/{code}.svg</code>, <code>.png</code> or <code>.pdf</code> (<code>?size=</code> in pixels, points for PDF; <code>?download</code> for an attachment). It encodes the short link with <code>?qr</code> on the end, so a scan is counted apart from a click. Make one-off codes with no account at <a href="/qr">/qr</a>.</p>
+<p>Saved codes live on your account (${num(PLANS.free.qrCodes)} on Free, ${num(PLANS.pro.qrCodes)} on Pro). <b>Dynamic</b> types (<code>url</code>, <code>vcard</code>, <code>event</code>, <code>links</code>) are short links underneath: they count scans and can change after printing; contact cards, events and link lists get a hosted page. <b>Static</b> types (<code>text</code>, <code>wifi</code>, <code>email</code>, <code>phone</code>, <code>sms</code>, <code>whatsapp</code>, <code>geo</code>, <code>crypto</code>) put the content in the code itself.</p>
+<pre class="code">curl -s ${e(s)}/api/v1/qr -H 'authorization: Bearer wx93_live_…' -H 'content-type: application/json' \\
+  -d '{"type":"url","data":{"url":"https://example.com/menu"},"name":"Table menu",
+       "style":{"fg":"#1d4ed8","dots":"dots","eye_frame":"circle","eye_ball":"circle"}}'
+curl -s -X PUT ${e(s)}/api/v1/qr/{id}/logo -H 'authorization: Bearer …' -H 'content-type: image/png' --data-binary @logo.png
+curl -s ${e(s)}/api/v1/qr/{id}/image.pdf -H 'authorization: Bearer …' -o menu.pdf</pre>
+<table class="tbl">
+<tr><td><code>GET /api/v1/qr/types</code></td><td>every type's fields, and the style options</td></tr>
+<tr><td><code>POST /api/v1/qr</code></td><td><code>{type, data: {…}, name?, style?, domain?, alias?}</code> → 201 code</td></tr>
+<tr><td><code>GET /api/v1/qr</code></td><td>your codes; <code>?q=&amp;limit=</code></td></tr>
+<tr><td><code>GET|PATCH|DELETE /api/v1/qr/{id}</code></td><td><code>{name?, data?, style?}</code>; deleting a dynamic code deletes its short link</td></tr>
+<tr><td><code>PUT|DELETE /api/v1/qr/{id}/logo</code></td><td>PNG or JPEG body (or multipart <code>logo</code>), up to 256 KB</td></tr>
+<tr><td><code>GET /api/v1/qr/{id}/image.svg|png|pdf</code></td><td>the code in its design; <code>?size=</code></td></tr>
+<tr><td><code>GET /api/v1/qr/{id}/stats</code></td><td><code>?days=30&amp;tz=Europe/Berlin&amp;source=qr|link</code></td></tr>
+<tr><td><code>GET|POST /qr/make.svg|png|pdf</code></td><td>a one-off static code, no account: <code>?type=wifi&amp;ssid=…&amp;password=…&amp;fg=…</code></td></tr>
+</table>
+<p>Style: <code>fg</code>, <code>bg</code>, <code>eye</code> (hex colours), <code>transparent</code>, <code>dots</code> (square, rounded, dots), <code>eye_frame</code> and <code>eye_ball</code> (square, rounded, circle), <code>ecc</code> (L, M, Q, H), <code>margin</code> (0 to 10). Colours with too little contrast to scan are refused.</p>
+<p>Stats, for links and dynamic codes alike: people, QR scans, unique visitors (per day), bots; on Pro and up, daily series, countries, cities, devices, operating systems, browsers, referrers, a weekday-by-hour heatmap in your time zone, this week against last, the last hour and the latest twenty visits.</p>
+
 <h2 id="cli">CLI and TUI</h2>
 <pre class="code copyable">curl -fsSL ${e(s)}/install | sh</pre>
 <p>Installs <code>wx93</code> under <code>~/.local</code> without sudo; adds the desktop app when there is a desktop session (<code>--desktop</code> / <code>--cli-only</code> to choose). Or <code>npm i -g @profullstack/wx93</code>.</p>
@@ -274,13 +300,16 @@ wx93 login              # OAuth 2.1 in your browser (--manual over SSH)
 wx93 ls                 # your links
 wx93 stats launch       # referrers, countries, devices
 wx93 qr launch          # a QR code in the terminal
+wx93 qr new wifi ssid=Cafe password=latte --png wifi.png
+wx93 qr new url url=https://example.com/menu --name Menu --dots dots --fg '#1d4ed8'
+wx93 qr ls | qr stats ID | qr get ID --pdf menu.pdf | qr rm ID
 wx93 bulk urls.txt      # one URL per line (Automation)
 wx93 tui                # all of it, as a screen
 wx93 mcp                # stdio MCP server
 wx93 upgrade | uninstall</pre>
 
 <h2 id="mcp">MCP server</h2>
-<p>Stdio: <code>npx -y @profullstack/wx93-mcp</code> (or <code>wx93 mcp</code>). It uses your <code>wx93 login</code> sign-in or <code>WX93_API_KEY</code>. Hosted: <code>POST ${e(s)}/mcp</code> (JSON-RPC 2.0, streamable HTTP, Bearer key optional). Tools: <code>shorten_url</code>, <code>bulk_shorten</code>, <code>list_links</code>, <code>get_link</code>, <code>link_stats</code>, <code>update_link</code>, <code>delete_link</code>, <code>expand_link</code>, <code>whoami</code>.</p>
+<p>Stdio: <code>npx -y @profullstack/wx93-mcp</code> (or <code>wx93 mcp</code>). It uses your <code>wx93 login</code> sign-in or <code>WX93_API_KEY</code>. Hosted: <code>POST ${e(s)}/mcp</code> (JSON-RPC 2.0, streamable HTTP, Bearer key optional). Tools: <code>shorten_url</code>, <code>bulk_shorten</code>, <code>list_links</code>, <code>get_link</code>, <code>link_stats</code>, <code>update_link</code>, <code>delete_link</code>, <code>expand_link</code>, <code>whoami</code>, <code>create_qr_code</code>, <code>list_qr_codes</code>, <code>update_qr_code</code>, <code>delete_qr_code</code>, <code>qr_code_stats</code>.</p>
 
 <h2 id="oauth">OAuth 2.1</h2>
 <p>Authorization code with PKCE (S256), loopback redirects, rotating refresh tokens. Metadata at <a href="/.well-known/oauth-authorization-server">/.well-known/oauth-authorization-server</a>. Public client id <code>wx93-cli</code>.</p>
@@ -296,7 +325,7 @@ curl -s ${e(s)}/api/v1/links -H "x-crawl-pass: $(node -p "require('./pass.json')
 <p>Every destination is checked when it is shortened: http and https only, no credentials in the URL, no private addresses, no other shorteners, our blocklist, the URLhaus and OpenPhish feeds (refreshed every few hours and swept over existing links), and Google Safe Browsing where configured. Anonymous links that look like credential phishing need an account. Anyone can <a href="/report">report a link</a>; after ${config.links.reportThreshold} independent reports it is pulled pending review.</p>
 
 <h2 id="privacy">Privacy</h2>
-<p>A click records the time, the referring site's hostname, a country code, and the device, browser and OS family. The visitor's IP address is used once to look up the country and is never stored.</p>
+<p>A click or scan records the time, the referring site's hostname, a country code and city, the device, browser and OS family, whether it came from a QR code, and a visitor key: a hash of the address and browser with a server secret and the day, so unique visitors can be counted without storing who they are or following anyone from one day to the next. The IP address itself is never stored.</p>
 </section>`,
   });
 }
@@ -367,6 +396,9 @@ ${flash ? `<p class="hint">${flash}</p>` : ''}
 ${plan.aliases ? `<div class="row"><label>${e(config.host)}/<input name="alias" placeholder="alias (optional)" pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,63}"></label><label>Expires <select name="expires_in"><option value="">never</option><option value="1d">in a day</option><option value="7d">in a week</option><option value="30d">in 30 days</option><option value="365d">in a year</option></select></label>${hostPicker(domains.filter((d) => d.verified_at).map((d) => d.hostname))}</div>` : ''}
 </form>
 
+<h2 id="qr">QR codes</h2>
+<p><a class="btn" href="/account/qr">Your QR codes</a> <span class="muted">dynamic codes with colours, logos and scan stats; ${num(plan.qrCodes)} on ${e(plan.name)}</span></p>
+
 <h2>Your links</h2>
 ${links.length ? `<table class="tbl links"><tr><th>Short</th><th>Destination</th><th>People</th><th></th></tr>${rows}</table>` : '<p class="muted">None yet.</p>'}
 
@@ -407,8 +439,11 @@ const bars = (rows, total) =>
         .join('')}</table>`
     : '<p class="muted">Nothing yet.</p>';
 
-export function LinkStatsPage({ user, link, stats, full }) {
-  const peak = Math.max(1, ...(stats.daily ?? []).map((d) => d.clicks));
+/** PNG, SVG and PDF of a link's QR code. */
+const qrDownloads = (link) =>
+  `<div class="row"><a class="btn small" href="${e(link.qr_png)}${link.qr_png.includes('?') ? '&' : '?'}download">QR (PNG)</a><a class="btn small" href="${e(link.qr_svg)}" download="${e(link.code)}.svg">SVG</a><a class="btn small" href="${e(link.qr_pdf)}">PDF</a></div>`;
+
+export function LinkStatsPage({ user, link, stats, full, query = {} }) {
   return layout({
     title: `Stats for ${link.code}`,
     noindex: true,
@@ -417,18 +452,8 @@ export function LinkStatsPage({ user, link, stats, full }) {
 <p class="eyebrow">Link</p>
 <h1 class="shorturl"><a href="${e(link.short_url)}">${e(link.short_url.replace(/^https?:\/\//, ''))}</a></h1>
 <p class="muted">→ <span class="dest">${e(link.url)}</span> · created ${day(link.created_at)}${link.expires_at ? ` · expires ${day(link.expires_at)}` : ''}</p>
-<div class="grid3">
-<div class="card"><h3>People</h3><p class="price small">${num(stats.humans)}</p><p class="muted">last ${stats.days} days</p></div>
-<div class="card"><h3>Bots and previews</h3><p class="price small">${num(stats.bots)}</p></div>
-<div class="card qr"><img src="${e(link.qr_svg)}" alt="QR code" width="120" height="120"><a class="btn small" href="${e(link.qr_svg)}" download="${e(link.code)}.svg">QR (SVG)</a></div>
-</div>
-${
-  full
-    ? `<h2>Daily</h2><div class="spark">${(stats.daily ?? []).map((d) => `<span title="${e(d.day)}: ${d.clicks}" style="height:${Math.max(2, Math.round((100 * d.clicks) / peak))}%"></span>`).join('') || '<p class="muted">No clicks yet.</p>'}</div>
-<div class="grid2"><div><h2>Referrers</h2>${bars(stats.referrers, stats.humans)}</div><div><h2>Countries</h2>${bars(stats.countries, stats.humans)}</div>
-<div><h2>Devices</h2>${bars(stats.devices, stats.humans)}</div><div><h2>Browsers</h2>${bars(stats.browsers, stats.humans)}</div></div>`
-    : '<p class="hint">Referrers, countries, devices and daily numbers come with <a href="/pricing">Pro</a>.</p>'
-}
+<div class="qr"><img src="${e(link.qr_svg)}" alt="QR code" width="120" height="120">${qrDownloads(link)}</div>
+${analytics(stats, { full, query })}
 <form method="post" action="/account/links/${e(link.id)}/delete" class="row"><button class="btn small danger">Delete this link</button></form>
 </section>`,
   });
@@ -554,3 +579,281 @@ export const Offline = () =>
     noindex: true,
     body: '<section class="narrow"><p class="eyebrow">Offline</p><h1>No connection.</h1><p class="lede">wx93 needs the network to shorten and to follow links. Try again when you are back online.</p></section>',
   });
+/* ------------------------------------------------------------- analytics -- */
+
+const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function heatmapTable(heatmap) {
+  const peak = Math.max(1, ...heatmap.flat());
+  const head = `<tr><th></th>${Array.from({ length: 24 }, (_, h) => `<th>${h % 3 ? '' : h}</th>`).join('')}</tr>`;
+  const rows = heatmap
+    .map(
+      (row, d) =>
+        `<tr><th>${DOW[d]}</th>${row
+          .map((n, h) => `<td title="${DOW[d]} ${String(h).padStart(2, '0')}:00 · ${n}" style="background:rgba(198,255,61,${n ? (0.15 + (0.85 * n) / peak).toFixed(2) : 0})"></td>`)
+          .join('')}</tr>`,
+    )
+    .join('');
+  return `<table class="heat" aria-label="Visits by weekday and hour">${head}${rows}</table>`;
+}
+
+const change = (pct) => (pct === null ? 'new this week' : `${pct > 0 ? '+' : ''}${pct}% on the week before`);
+
+/**
+ * The numbers for one link or one dynamic QR code. `full` is the Pro view; the
+ * filter form re-reads the page with ?days, ?tz and ?source.
+ */
+export function analytics(stats, { full, query = {}, scansLabel = 'People' } = {}) {
+  const totals = `<div class="grid4">
+<div class="card"><h3>${e(scansLabel)}</h3><p class="price small">${num(stats.humans)}</p><p class="muted">last ${stats.days} days${stats.source ? `, ${stats.source === 'qr' ? 'scans' : 'clicks'} only` : ''}</p></div>
+<div class="card"><h3>QR scans</h3><p class="price small">${num(stats.scans)}</p><p class="muted">opened from a wx93 QR code</p></div>
+<div class="card"><h3>Unique visitors</h3><p class="price small">${num(stats.visitors)}</p><p class="muted">${stats.unique_rate}% of visits, counted per day</p></div>
+<div class="card"><h3>Bots and previews</h3><p class="price small">${num(stats.bots)}</p></div>
+</div>`;
+  if (!full) return `${totals}<p class="hint">Cities, devices, the weekday-by-hour heatmap, live scans and week-over-week come with <a href="/pricing">Pro</a>.</p>`;
+  const peak = Math.max(1, ...(stats.daily ?? []).map((d) => d.humans));
+  const filter = `<form method="get" class="row filters"><label>Days <select name="days">${[7, 30, 90, 365].map((d) => `<option${Number(query.days || stats.days) === d ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
+<label>Show <select name="source"><option value="">everything</option><option value="qr"${query.source === 'qr' ? ' selected' : ''}>QR scans</option><option value="link"${query.source === 'link' ? ' selected' : ''}>link clicks</option></select></label>
+<label>Time zone <input name="tz" value="${e(query.tz || stats.tz)}" placeholder="America/New_York" size="18"></label><button class="btn small">Apply</button></form>`;
+  const recent = stats.live.recent.length
+    ? `<div class="scrollx"><table class="tbl"><tr><th>When (UTC)</th><th>How</th><th>Where</th><th>Device</th><th>From</th></tr>${stats.live.recent
+        .map(
+          (r) =>
+            `<tr><td class="mono">${e(new Date(r.at).toISOString().slice(0, 16).replace('T', ' '))}</td><td>${r.source === 'qr' ? 'scan' : 'click'}</td><td>${e([r.city, r.country].filter(Boolean).join(', '))}</td><td>${e([r.device, r.os, r.browser].filter(Boolean).join(' · '))}</td><td>${e(r.referrer_host ?? 'direct')}</td></tr>`,
+        )
+        .join('')}</table></div>`
+    : '<p class="muted">Nobody yet.</p>';
+  return `${filter}${totals}
+<div class="grid3">
+<div class="card"><h3>This week</h3><p class="price small">${num(stats.week.this_week)}</p><p class="muted">${change(stats.week.change_pct)} (${num(stats.week.last_week)})</p></div>
+<div class="card"><h3>Last hour</h3><p class="price small">${num(stats.live.last_hour)}</p><p class="muted">live: reload to refresh</p></div>
+<div class="card"><h3>How they came</h3>${bars(stats.sources.map((s) => ({ ...s, key: s.key === 'qr' ? 'QR scan' : 'link click' })), stats.humans)}</div>
+</div>
+<h2>Daily</h2><div class="spark">${(stats.daily ?? []).map((d) => `<span title="${e(d.day)}: ${d.humans} (${d.scans} scans)" style="height:${Math.max(2, Math.round((100 * d.humans) / peak))}%"></span>`).join('') || '<p class="muted">No visits yet.</p>'}</div>
+<h2>When (${e(stats.tz)})</h2>${heatmapTable(stats.heatmap)}
+<div class="grid2"><div><h2>Countries</h2>${bars(stats.countries, stats.humans)}</div><div><h2>Cities</h2>${bars(stats.cities, stats.humans)}</div>
+<div><h2>Devices</h2>${bars(stats.devices, stats.humans)}</div><div><h2>Operating systems</h2>${bars(stats.os, stats.humans)}</div>
+<div><h2>Browsers</h2>${bars(stats.browsers, stats.humans)}</div><div><h2>Referrers</h2>${bars(stats.referrers, stats.humans)}</div></div>
+<h2>Latest</h2>${recent}`;
+}
+
+/* ---------------------------------------------------------------- QR codes -- */
+
+const STYLE_FIELDS = ['fg', 'bg', 'eye', 'transparent', 'dots', 'eye_frame', 'eye_ball', 'ecc', 'margin'];
+
+function fieldInput(type, [name, label, kind, required], values = {}) {
+  const v = values[name] ?? '';
+  const id = `f-${type}-${name}`;
+  const req = required ? ' required' : '';
+  if (kind === 'check') return `<label class="check"><input type="checkbox" name="${name}" value="1"${v === true || v === '1' || v === 'on' ? ' checked' : ''}> ${e(label)}</label>`;
+  if (Array.isArray(kind))
+    return `<label for="${id}">${e(label)}</label><select id="${id}" name="${name}"${req}>${kind.map((o) => `<option${String(v) === o ? ' selected' : ''}>${e(o)}</option>`).join('')}</select>`;
+  if (kind === 'long') return `<label for="${id}">${e(label)}</label><textarea id="${id}" name="${name}" rows="${name === 'links' ? 6 : 3}" maxlength="2000"${req}${name === 'links' ? ' placeholder="Website | https://example.com&#10;Shop | https://shop.example.com"' : ''}>${e(v)}</textarea>`;
+  const html = { url: 'url', email: 'email', tel: 'tel', number: 'text', datetime: 'datetime-local', tz: 'text', text: 'text' }[kind] ?? 'text';
+  return `<label for="${id}">${e(label)}${required ? '' : ' <span class="muted">(optional)</span>'}</label><input id="${id}" name="${name}" type="${html}" value="${e(v)}"${req}${kind === 'number' ? ' inputmode="decimal"' : ''} autocomplete="off">`;
+}
+
+const qrFields = (type, values) => QR_TYPES[type].fields.map((f) => fieldInput(type, f, values)).join('\n');
+
+function styleFields(style = {}) {
+  const s = { ...DEFAULT_STYLE, ...style };
+  const sel = (name, list) => `<select name="${name}">${list.map((o) => `<option${s[name] === o ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
+  return `<div class="row">
+<label>Colour <input type="color" name="fg" value="${e(s.fg)}"></label>
+<label>Background <input type="color" name="bg" value="${e(s.bg)}"></label>
+<label>Eyes <input type="color" name="eye" value="${e(s.eye ?? s.fg)}"></label>
+<label class="check"><input type="checkbox" name="transparent" value="1"${s.transparent ? ' checked' : ''}> transparent</label>
+</div><div class="row">
+<label>Dots ${sel('dots', DOTS)}</label><label>Eye frame ${sel('eye_frame', EYES)}</label><label>Eye centre ${sel('eye_ball', EYES)}</label>
+<label>Error correction ${sel('ecc', ECC)}</label><label>Margin <input name="margin" type="number" min="0" max="10" value="${e(s.margin)}" style="width:5em"></label>
+</div>`;
+}
+
+function typeTabs(base, current, { only } = {}) {
+  const group = (dynamic) =>
+    Object.entries(QR_TYPES)
+      .filter(([, t]) => t.dynamic === dynamic && (!only || only(t)))
+      .map(([k, t]) => `<a class="tab${k === current ? ' on' : ''}" href="${base}?type=${k}">${e(t.label)}</a>`)
+      .join('');
+  const dyn = group(true);
+  const stat = group(false);
+  return `<nav class="tabs" aria-label="Kind of code">${dyn ? `<span class="tabgroup">Dynamic</span>${dyn}` : ''}${stat ? `<span class="tabgroup">Static</span>${stat}` : ''}</nav>`;
+}
+
+/** Hidden copies of a one-off code's fields, so a download button re-sends exactly what was previewed. */
+function hiddenValues(type, values) {
+  const keys = ['type', ...QR_TYPES[type].fields.map((f) => f[0]), ...STYLE_FIELDS];
+  return keys
+    .filter((k) => values[k] !== undefined && values[k] !== '')
+    .map((k) => `<input type="hidden" name="${k}" value="${e(values[k])}">`)
+    .join('');
+}
+
+export function QrGenerator({ user, type, values = {}, preview, error }) {
+  const t = QR_TYPES[type];
+  const downloads = preview
+    ? `<div class="row">${['png', 'svg', 'pdf']
+        .map((f) => `<form method="post" action="/qr/make.${f}?download">${hiddenValues(type, { ...values, type })}<button class="btn small${f === 'png' ? ' primary' : ''}">Download ${f.toUpperCase()}</button></form>`)
+        .join('')}</div>`
+    : '';
+  return layout({
+    title: 'QR code generator',
+    path: '/qr',
+    description: 'Free QR code generator: websites, Wi-Fi, contact cards, events, SMS, WhatsApp, email, locations and crypto. Colours, dot and eye styles, PNG, SVG and PDF. Dynamic codes count every scan.',
+    user,
+    body: `<section class="narrow wide"><p class="eyebrow">QR codes</p>
+<h1>Make a QR code. <span class="accent">Count every scan.</span></h1>
+<p class="lede">Twelve kinds of code, your colours and shapes, PNG, SVG or print-ready PDF. Nothing to sign up for here. <a href="${user ? '/account/qr' : '/signup?next=/account/qr'}">Save it to an account</a> to get a <b>dynamic</b> code: change where it goes after it is printed, add a logo, and see scans by day, hour, country, city and device.</p>
+${typeTabs('/qr', type)}
+<div class="qrmake">
+<form method="post" action="/qr" class="card stack">
+<input type="hidden" name="type" value="${e(type)}">
+<p class="hint">${e(t.hint)}${t.dynamic ? ' Made here, it holds the content itself; save it to an account to make it dynamic and counted.' : ''}</p>
+${qrFields(type, values)}
+<details class="more"${values.fg ? ' open' : ''}><summary>Colours and shapes</summary>${styleFields(values.fg ? parseStyleSafe(values) : {})}</details>
+<button class="btn primary">Make QR code</button>
+${error ? `<p class="error">${e(error)}</p>` : ''}
+</form>
+<div class="card qrpreview">${preview ? `<div class="qrimg">${preview.replace(/^<\?xml[^>]*>\s*/, '')}</div>${downloads}<p class="muted tiny">Test it with your phone's camera before you print a thousand.</p>` : '<p class="muted">Your code appears here.</p>'}</div>
+</div>
+</section>`,
+  });
+}
+
+function parseStyleSafe(values) {
+  try {
+    return parseStyle(values);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * A list thumbnail. A dynamic code's comes from its public, cached /qr/<code>.svg;
+ * a static one is drawn inline (no logo), so a long list costs no API calls.
+ */
+function thumb(qr, size = 48) {
+  if (qr.link) return `<img class="qrthumb" src="${e(qr.link.qr_svg)}${qr.link.qr_svg.includes('?') ? '&' : '?'}size=${size}" alt="" width="${size}" height="${size}" loading="lazy">`;
+  try {
+    return `<span class="qrthumb">${renderSvg(layoutQr(qr.encodes, qr.style), { size: Math.max(size, 64) }).replace(/^<\?xml[^>]*>\s*/, '').replace(/width="\d+" height="\d+"/, `width="${size}" height="${size}"`)}</span>`;
+  } catch {
+    return '';
+  }
+}
+
+export function QrList({ user, plan, codes, type = 'url', domains = [], values = {}, flash }) {
+  const t = QR_TYPES[type];
+  const rows = codes
+    .map(
+      (q) => `<tr><td><a href="/account/qr/${e(q.id)}">${thumb(q, 48)}</a></td><td><a href="/account/qr/${e(q.id)}">${e(q.name)}</a><br><span class="muted tiny">${e(QR_TYPES[q.type]?.label ?? q.type)}${q.dynamic ? ' · dynamic' : ' · static'}${q.logo ? ' · logo' : ''}</span></td>
+<td class="dest">${e(q.short_url ?? q.summary)}</td><td class="num">${q.dynamic ? num(q.scans) : '–'}</td></tr>`,
+    )
+    .join('');
+  return layout({
+    title: 'QR codes',
+    noindex: true,
+    user,
+    body: `<section class="narrow wide">
+<p class="eyebrow">Account</p><h1>QR codes</h1>
+<p class="muted">${num(codes.length)} of ${num(plan.qrCodes)} on ${e(plan.name)}. Dynamic codes are short links underneath: they count scans and you can change them after printing.${plan.interstitial ? ' On Free, people who scan one see the short ad page first; <a href="/pricing">Pro</a> codes go straight through.' : ''}</p>
+${flash ? `<p class="hint error">${flash}</p>` : ''}
+<h2>New code</h2>
+${typeTabs('/account/qr', type)}
+<form method="post" action="/account/qr" class="card stack">
+<input type="hidden" name="type" value="${e(type)}">
+<p class="hint">${e(t.hint)}</p>
+<label for="qr-name">Name <span class="muted">(for your list)</span></label><input id="qr-name" name="name" maxlength="120" value="${e(values.name ?? '')}">
+${qrFields(type, values)}
+${
+  t.dynamic
+    ? `<div class="row"><label>Domain <select name="domain">${[...config.shortHosts, ...domains].map((h) => `<option${values.domain === h ? ' selected' : ''}>${e(h)}</option>`).join('')}</select></label>${plan.aliases ? `<label>Alias <input name="alias" placeholder="optional" pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,63}" value="${e(values.alias ?? '')}"></label>` : ''}</div>`
+    : ''
+}
+<details class="more"><summary>Colours and shapes (you can change these later, and add a logo)</summary>${styleFields(values.fg ? parseStyleSafe(values) : {})}</details>
+<button class="btn primary">Create QR code</button>
+</form>
+<h2>Your codes</h2>
+${codes.length ? `<table class="tbl links"><tr><th></th><th>Name</th><th>Encodes</th><th>Scans</th></tr>${rows}</table>` : '<p class="muted">None yet.</p>'}
+</section>`,
+  });
+}
+
+export function QrDetail({ user, plan, qr, stats, query = {}, flash }) {
+  const t = QR_TYPES[qr.type];
+  const dl = (f, label, extra = '') => `<a class="btn small${f === 'png' ? ' primary' : ''}" href="${e(qr.image[f])}?download${extra}">${label}</a>`;
+  return layout({
+    title: qr.name,
+    noindex: true,
+    user,
+    body: `<section class="narrow wide">
+<p class="eyebrow"><a href="/account/qr">QR codes</a> · ${e(t?.label ?? qr.type)} · ${qr.dynamic ? 'dynamic' : 'static'}</p>
+<h1>${e(qr.name)}</h1>
+${flash ? `<p class="hint error">${flash}</p>` : ''}
+<div class="qrmake">
+<div class="card qrpreview"><div class="qrimg"><img src="${e(qr.image.svg)}?v=${e(new Date(qr.updated_at).getTime())}" alt="The QR code" width="260" height="260"></div>
+<div class="row">${dl('png', 'PNG')}${dl('png', 'PNG 2048', '&size=2048')}${dl('svg', 'SVG')}${dl('pdf', 'PDF (print)')}</div></div>
+<div class="card stack">
+${qr.short_url ? `<p>Scans go through <a class="mono" href="${e(qr.short_url)}+">${e(qr.short_url.replace(/^https?:\/\//, ''))}</a>${qr.landing_url ? `, which opens <a href="${e(qr.landing_url)}">its page</a>` : ` to <span class="dest">${e(qr.data.url)}</span>`}.</p>` : `<p class="muted">Static: the phone reads this code itself, so it cannot be counted or changed after printing.</p>`}
+<p class="muted tiny">Encodes <code>${e(qr.encodes.length > 160 ? `${qr.encodes.slice(0, 160)}…` : qr.encodes)}</code></p>
+${qr.dynamic ? `<p class="price small">${num(qr.scans)} <small>people all time</small></p>` : ''}
+</div>
+</div>
+
+<h2 id="content">Content</h2>
+<form method="post" action="/account/qr/${e(qr.id)}/content" class="card stack">
+<label for="qr-name">Name</label><input id="qr-name" name="name" maxlength="120" value="${e(qr.name)}">
+${qrFields(qr.type, qr.data)}
+<button class="btn primary">Save</button>${qr.dynamic ? '<p class="hint">The printed code keeps working: it points at the same short link.</p>' : '<p class="hint">Changing a static code changes the picture: print the new one.</p>'}
+</form>
+
+<h2 id="design">Design</h2>
+<form method="post" action="/account/qr/${e(qr.id)}/style" class="card stack">${styleFields(qr.style)}<button class="btn primary">Save design</button></form>
+<div class="card stack"><h3>Logo</h3>
+<form method="post" action="/account/qr/${e(qr.id)}/logo" enctype="multipart/form-data" class="row"><input type="file" name="logo" accept="image/png,image/jpeg" required><button class="btn">Upload</button></form>
+${qr.logo ? `<form method="post" action="/account/qr/${e(qr.id)}/unlogo"><button class="btn small">Remove the logo</button></form>` : ''}
+<p class="hint">PNG or JPEG, up to 256 KB, placed in the middle. A logo switches the code to the highest error correction so it still scans.</p></div>
+
+${qr.dynamic ? `<h2 id="stats">Scans</h2>${stats ? analytics(stats, { full: plan.stats, query, scansLabel: 'People' }) : ''}` : ''}
+<form method="post" action="/account/qr/${e(qr.id)}/delete" class="row"><button class="btn small danger">Delete this code${qr.dynamic ? ' and its short link' : ''}</button></form>
+</section>`,
+  });
+}
+
+/* ------------------------------------------- the pages behind dynamic codes -- */
+
+const when = (v, tz) => `${String(v).slice(0, 16).replace('T', ' ')} ${tz ? `(${tz})` : /(Z|[+-]\d{2}:?\d{2})$/.test(String(v)) ? '' : 'UTC'}`;
+
+export function HostedPage({ row, links = [] }) {
+  const d = row.data;
+  let title;
+  let body;
+  if (row.type === 'vcard') {
+    title = [d.first, d.last].filter(Boolean).join(' ');
+    body = `<h1>${e(title)}</h1>
+${d.title || d.org ? `<p class="lede">${e([d.title, d.org].filter(Boolean).join(', '))}</p>` : ''}
+<div class="stack hosted-links">
+<a class="btn primary big" href="/p/${e(row.id)}.vcf">Save contact</a>
+${d.phone ? `<a class="btn" href="tel:${e(d.phone.replace(/[^\d+]/g, ''))}">Call ${e(d.phone)}</a>` : ''}
+${d.email ? `<a class="btn" href="mailto:${e(d.email)}">${e(d.email)}</a>` : ''}
+${d.url ? `<a class="btn" href="${e(d.url)}" rel="nofollow noopener">${e(host(d.url))}</a>` : ''}
+</div>
+${d.address ? `<p class="muted">${e(d.address)}</p>` : ''}${d.note ? `<p>${e(d.note)}</p>` : ''}`;
+  } else if (row.type === 'event') {
+    title = d.title;
+    body = `<p class="eyebrow">Event</p><h1>${e(d.title)}</h1>
+<p class="lede">${e(when(d.start, d.tz))}${d.end ? ` to ${e(when(d.end, d.tz))}` : ''}</p>
+${d.location ? `<p>${e(d.location)}</p>` : ''}${d.description ? `<p class="muted">${e(d.description)}</p>` : ''}
+<div class="stack hosted-links"><a class="btn primary big" href="/p/${e(row.id)}.ics">Add to calendar</a>${d.url ? `<a class="btn" href="${e(d.url)}" rel="nofollow noopener">More about it</a>` : ''}</div>`;
+  } else {
+    title = d.title;
+    body = `<h1>${e(d.title)}</h1>${d.description ? `<p class="lede">${e(d.description)}</p>` : ''}
+<div class="stack hosted-links">${links.map((l) => `<a class="btn big" href="${e(l.url)}" rel="nofollow noopener">${e(l.label)}</a>`).join('')}</div>`;
+  }
+  return layout({
+    title,
+    noindex: true,
+    bare: true,
+    body: `<section class="narrow hosted">${body}
+<p class="tiny muted made">Made with <a href="${e(config.siteUrl)}/qr">wx93 QR codes</a> · <a href="/report">Report</a></p></section>`,
+  });
+}
