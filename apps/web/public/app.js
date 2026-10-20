@@ -3,6 +3,19 @@
 (() => {
   for (const el of document.querySelectorAll('.js-only')) el.hidden = false;
 
+  // The home ad strip: one frame, the leaderboard when it fits.
+  for (const ad of document.querySelectorAll('[data-frame-wide]')) {
+    const wide = ad.clientWidth >= 728;
+    const f = document.createElement('iframe');
+    f.src = wide ? ad.dataset.frameWide : ad.dataset.frameNarrow;
+    f.width = wide ? 728 : 320;
+    f.height = wide ? 90 : 50;
+    f.title = 'Advertisement';
+    f.loading = 'lazy';
+    f.scrolling = 'no';
+    ad.append(f);
+  }
+
   document.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('[data-copy]');
     if (!btn) return;

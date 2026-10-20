@@ -70,7 +70,7 @@ ${bare ? '' : nav(user)}
 ${body}
 </main>
 ${bare ? '' : footer()}
-${bare ? '' : '<script src="/assets/app.js?v=${JS_V}" defer></script>'}
+${bare ? '' : `<script src="/assets/app.js?v=${JS_V}" defer></script>`}
 </body>
 </html>`;
 }

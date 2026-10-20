@@ -45,9 +45,17 @@ export const AD_NETWORK = { claim: '1Y56GiKE8eHj0t06', slot: 'fb195e7b-6641-49cc
 
 export const adNetworkMeta = () => `<meta name="ad.network" content="${e(AD_NETWORK.claim)}">`;
 
+const homeFrame = (format) => `https://crawlproof.com/api/ads/frame?slot=${encodeURIComponent(AD_NETWORK.slot)}&format=${format}`;
+
+/**
+ * A thin strip: the leaderboard where it fits, the mobile banner below that.
+ * app.js picks one by the unit's width so only one frame loads; without
+ * JavaScript the noscript mobile banner shows.
+ */
 export function homeAd() {
-  const src = `https://crawlproof.com/api/ads/frame?slot=${encodeURIComponent(AD_NETWORK.slot)}&format=banner_300x250`;
-  return `<aside class="home-ad" data-ad-network="${e(AD_NETWORK.claim)}" data-cp-ad data-slot="${e(AD_NETWORK.slot)}" data-format="banner_300x250" aria-label="Advertisement"><iframe src="${e(src)}" width="300" height="250" loading="lazy" style="border:0" title="Advertisement"></iframe></aside>`;
+  const wide = homeFrame('banner_728x90');
+  const narrow = homeFrame('banner_320x50');
+  return `<aside class="home-ad" data-ad-network="${e(AD_NETWORK.claim)}" data-cp-ad data-slot="${e(AD_NETWORK.slot)}" data-format="banner_728x90" data-frame-wide="${e(wide)}" data-frame-narrow="${e(narrow)}" aria-label="Advertisement"><noscript><iframe src="${e(narrow)}" width="320" height="50" loading="lazy" scrolling="no" style="border:0" title="Advertisement"></iframe></noscript></aside>`;
 }
 
 /**
