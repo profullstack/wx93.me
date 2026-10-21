@@ -15,10 +15,10 @@
         "@profullstack/auth-system": "^0.7.1",
         "@profullstack/footer": "latest",
         "@profullstack/form-guard": "^0.2.1",
-        "@profullstack/throttle": "^0.3.2",
+        "@profullstack/throttle": "^0.3.3",
         "@profullstack/watchdog": "^0.3.0",
         "@profullstack/wx93": "workspace:*",
-        "@profullstack/x402-gateway": "^0.10.1",
+        "@profullstack/x402-gateway": "^0.11.0",
         "@resvg/resvg-wasm": "2.6.2",
         "@simplewebauthn/browser": "^13",
         "@simplewebauthn/server": "^13.2.0",
@@ -104,7 +104,7 @@
 
     "@profullstack/keys": ["@profullstack/keys@0.1.0", "", {}, "sha512-Vys47LvS5ivhdZu4SYOxh9Le3DEmWhjP0+CtrU45RhXAbY0ZFG/2Dk9V1bIIUGDp8UWMJqctvUD21JrNjfh04w=="],
 
-    "@profullstack/throttle": ["@profullstack/throttle@0.3.2", "", { "dependencies": { "@profullstack/x402-gateway": "^0.6.0 || ^0.7.0 || ^0.8.0 || ^0.9.0 || ^0.10.0" } }, "sha512-53bE30J/vjuuahKiBveB3oKL+L03ufNGwmmSk9yfQwInfmC3xr9I7DvDkPti/wwAuk6V6bcfUqeazgNGLfe8rQ=="],
+    "@profullstack/throttle": ["@profullstack/throttle@0.3.3", "", { "dependencies": { "@profullstack/x402-gateway": "^0.6.0 || ^0.7.0 || ^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0" } }, "sha512-GigeMGXS/1T2UseW0gYvFbxgMuo89/bhW92xMPv/IKAR860mhCdo2G8U4Schciw27seDXVGNErWpTSUC2zGoiA=="],
 
     "@profullstack/watchdog": ["@profullstack/watchdog@0.3.0", "", { "bin": { "watchdog-autoheal": "bin/watchdog-autoheal.js" } }, "sha512-w+Wc7+2smPzV2LdxwIKWBVX0jMyE8+uokPoC2xbBL2yYSiaz356wrTS81l+rbRLdFFHXusRv9tNHUTEtRDfLCQ=="],
 
@@ -112,7 +112,7 @@
 
     "@profullstack/wx93-mcp": ["@profullstack/wx93-mcp@workspace:packages/mcp"],
 
-    "@profullstack/x402-gateway": ["@profullstack/x402-gateway@0.10.1", "", { "dependencies": { "@profullstack/keys": "^0.1.0" } }, "sha512-YF/P3GRbb/8dAHIhDT2R7yHSAK+olrT4/zAWLzf5aF9Na8o1/rJCdP+k6UnGepyQ9RQ2qL9p5diRVwb18Zt4VA=="],
+    "@profullstack/x402-gateway": ["@profullstack/x402-gateway@0.11.0", "", { "dependencies": { "@profullstack/keys": "^0.1.0" } }, "sha512-Lfrz+SRTwQZfcoCaVtaaMNPJx74Lp/5oyS7vJJAEuJmH1TjBzhE7dWquISkj1p42oc+VW5I9xH9p7YhEKqmr4Q=="],
 
     "@resvg/resvg-wasm": ["@resvg/resvg-wasm@2.6.2", "", {}, "sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw=="],
 
