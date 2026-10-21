@@ -1,4 +1,4 @@
-import { adNetworkMeta, homeAd, renderAd } from './ads.js';
+import { adNetworkMeta, renderAd } from './ads.js';
 import { siteFooter } from './footer.js';
 import { ringFooter } from './ring-footer.js';
 import { config, PLANS } from './config.js';
@@ -128,7 +128,6 @@ export function Landing({ user, plan, guardFields, value = '' }) {
 <p class="lede">wx93.me turns long URLs into short ones that open with a plain HTTP redirect, so they work in every browser, every chat app and every terminal. Stats, QR codes, custom aliases, expiry, and an API, CLI and MCP server for your agents.</p>
 ${shortenForm({ guardFields, user, plan, value })}
 </section>
-${homeAd()}
 <section class="grid3">
 <div class="card"><h3>Works with JavaScript off</h3><p>A short link is a 301 or 302. Previews in Slack, iMessage, X and Discord unfurl the real page, because crawlers always get the direct redirect.</p></div>
 <div class="card"><h3>Numbers you can use</h3><p>Clicks by day, referrer, country, device and browser, with people and bots counted apart. No IP address is ever stored.</p></div>

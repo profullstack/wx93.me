@@ -21,7 +21,7 @@ export const PROVIDERS = {
     const slot = config.ads.crawlproofSlot;
     if (!slot) return PROVIDERS.house({ placement });
     const src = `https://crawlproof.com/api/ads/frame?slot=${encodeURIComponent(slot)}&format=${encodeURIComponent(config.ads.crawlproofFormat)}`;
-    return `<div class="ad ad-${e(placement)}"><span class="ad-label">Sponsored</span><iframe src="${e(src)}" title="Sponsored" loading="eager" referrerpolicy="strict-origin-when-cross-origin" scrolling="no" sandbox="allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"></iframe></div>`;
+    return `<div class="ad ad-${e(placement)}"><iframe src="${e(src)}" title="Sponsored" loading="eager" referrerpolicy="strict-origin-when-cross-origin" scrolling="no" sandbox="allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"></iframe></div>`;
   },
   house({ placement = 'interstitial' } = {}) {
     return `<div class="ad ad-${e(placement)} ad-house"><span class="ad-label">From wx93</span><a href="${e(config.siteUrl)}/pricing" rel="sponsored"><strong>Links without this page.</strong> Pro is $5 a month, paid in crypto. Your links go straight through.</a></div>`;
@@ -37,30 +37,17 @@ export function renderAd(ctx = {}) {
 }
 
 /**
- * Our ad.network publisher unit on the home page. ad.network verifies the site by
- * finding the claim code in the raw HTML (the unit's attribute and the head meta).
- * The ad itself is a crawlproof frame, so it needs no script and passes the CSP.
+ * Our ad.network publisher claim. ad.network verifies the site by finding the
+ * claim code in the raw HTML of the home page (the head meta). The home page
+ * itself carries no ad unit.
  */
-export const AD_NETWORK = { claim: '1Y56GiKE8eHj0t06', slot: 'fb195e7b-6641-49cc-8b7c-000647059aa9' };
+export const AD_NETWORK = { claim: '1Y56GiKE8eHj0t06' };
 
 export const adNetworkMeta = () => `<meta name="ad.network" content="${e(AD_NETWORK.claim)}">`;
 
-const homeFrame = (format) => `https://crawlproof.com/api/ads/frame?slot=${encodeURIComponent(AD_NETWORK.slot)}&format=${format}`;
-
 /**
- * A thin strip: the leaderboard where it fits, the mobile banner below that.
- * app.js picks one by the unit's width so only one frame loads; without
- * JavaScript the noscript mobile banner shows.
- */
-export function homeAd() {
-  const wide = homeFrame('banner_728x90');
-  const narrow = homeFrame('banner_320x50');
-  return `<aside class="home-ad" data-ad-network="${e(AD_NETWORK.claim)}" data-cp-ad data-slot="${e(AD_NETWORK.slot)}" data-format="banner_728x90" data-frame-wide="${e(wide)}" data-frame-narrow="${e(narrow)}" aria-label="Advertisement"><noscript><iframe src="${e(narrow)}" width="320" height="50" loading="lazy" scrolling="no" style="border:0" title="Advertisement"></iframe></noscript></aside>`;
-}
-
-/**
- * The frame origins the CSP must allow. Site pages (`site`) always frame the
- * home page unit; the interstitial only needs the configured provider.
+ * The frame origins the CSP must allow. The interstitial only needs the
+ * configured provider; site pages (`site`) keep crawlproof allowed.
  */
 export function adFrameOrigins({ site = false } = {}) {
   return site || (config.ads.provider === 'crawlproof' && config.ads.crawlproofSlot) ? ['https://crawlproof.com'] : [];
