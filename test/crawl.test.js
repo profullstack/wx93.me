@@ -1,5 +1,4 @@
 import { beforeAll, expect, test } from 'bun:test';
-import { Hono } from 'hono';
 
 /** The crawl door: charged on wx93's own pages, never on a short link. No network. */
 let app;
@@ -10,10 +9,16 @@ beforeAll(async () => {
     CRAWL_PAY_TO: '0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5',
   });
   const { crawlGuard } = await import('../apps/web/src/throttle.js');
-  app = new Hono();
-  app.use('*', crawlGuard());
-  app.get('/', (c) => c.text('home'));
-  app.get('/:code', (c) => c.text('redirect'));
+  // The guard only reads c.req.path and c.req.raw, so a bare context drives it
+  // (hono is a workspace dependency of apps/web, not resolvable from test/).
+  const guard = crawlGuard();
+  app = {
+    request: async (url, init) => {
+      const raw = new Request(url, init);
+      const c = { req: { path: new URL(raw.url).pathname, raw } };
+      return guard(c, async () => new Response('page', { status: 200 }));
+    },
+  };
 });
 
 const GPTBOT = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)';
