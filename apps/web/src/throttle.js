@@ -98,6 +98,43 @@ export async function paidPass(request) {
   return ok ? token : null;
 }
 
+/**
+ * The crawl door: the fleet's day pass ($1 a day over x402, or any coin / PayPal through
+ * CoinPay's hosted checkout) sold on /crawl, charged to AI training crawlers, headless
+ * browsers and SEO scrapers on wx93's own pages only. Short-link redirects, QR images
+ * and the API stay free for every crawler (see `isPaidAgent` above); people, verified
+ * search crawlers and the AI chat/search fetchers are never charged anywhere.
+ *
+ * Its own pass secret, so a crawl pass reads pages and never counts as an x402 link pass.
+ */
+export const CRAWL_PAGES = new Set(['/', '/pricing', '/docs', '/desktop', '/share', '/qr', '/report', '/offline']);
+let crawl = null;
+
+export function crawlGateway() {
+  const x = config.x402;
+  if (!x.scopedKey || !x.payTo) return null;
+  return (crawl ??= createGateway({
+    siteUrl: config.siteUrl,
+    siteName: 'wx93',
+    coinpay: { apiKey: x.scopedKey, baseUrl: config.coinpay.baseUrl },
+    payTo: x.payTo,
+    secret: `${x.scopedKey}:crawl`,
+    contact: 'mailto:anthony@profullstack.com',
+    exempt: (request) => (request.headers.get('cookie') ?? '').includes(`${config.session.cookie}=`),
+  }));
+}
+
+export function crawlGuard() {
+  return async (c, next) => {
+    const path = c.req.path;
+    if (path !== '/crawl' && !path.startsWith('/crawl/') && !CRAWL_PAGES.has(path)) return next();
+    const gw = crawlGateway();
+    const answer = gw ? await gw.handle(c.req.raw) : null;
+    return answer ?? next();
+  };
+}
+
 export const resetTrafficGuard = () => {
   built = null;
+  crawl = null;
 };

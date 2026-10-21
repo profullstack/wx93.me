@@ -228,7 +228,7 @@ export const config = {
       return env('COINPAY_X402_KEY');
     },
     get payTo() {
-      return env('X402_PAY_TO');
+      return env('X402_PAY_TO') || env('CRAWL_PAY_TO');
     },
     get enabled() {
       return bool('X402_ENABLED', false) && Boolean(this.payTo && this.scopedKey);

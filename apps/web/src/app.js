@@ -42,7 +42,7 @@ import { codeFrom, HttpError, parseExpiry, parseRedirectType, referrerHost } fro
 import { contrast, DOTS, ECC, EYES, FORMATS, layoutQr, LOGO_MAX_BYTES, parseStyle, renderQr, sniffLogo } from './qr.js';
 import { encodeStatic, icsText, parseLinkList, parseQrData, QR_TYPES, summary, TYPE_NAMES, vcardText } from './qr-types.js';
 import * as Q from './qrcodes.js';
-import { paidPass, trafficGuard } from './throttle.js';
+import { crawlGuard, paidPass, trafficGuard } from './throttle.js';
 import { classify, isPrefetch } from './ua.js';
 import { EVENTS, deliver, forgetHooks, newSecret } from './webhooks.js';
 import { refreshFooter } from './footer.js';
@@ -127,6 +127,9 @@ app.use('*', async (c, next) => {
   const u = new URL(c.req.url);
   return c.redirect(`${config.siteUrl}${path}${u.search}`, 301);
 });
+
+// After the alt-host redirect: /crawl and the pages live on the primary host only.
+app.use('*', crawlGuard());
 
 /* ---------------------------------------------------------------- helpers -- */
 
