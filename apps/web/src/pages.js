@@ -167,7 +167,7 @@ ${shortenForm({ guardFields, user, plan })}
   });
 }
 
-export function planCards({ compact = false, user, plan, chains = [], defaultChain } = {}) {
+export function planCards({ compact = false, user, plan } = {}) {
   const card = (key, blurb, features) => {
     const p = PLANS[key];
     const current = plan?.key === key;
@@ -180,7 +180,6 @@ export function planCards({ compact = false, user, plan, chains = [], defaultCha
           ? `<form method="post" action="/billing/checkout" class="buy">
               <input type="hidden" name="plan" value="${key}">
               <select name="term" aria-label="Term"><option value="month">${money(p.monthCents)} for a month</option><option value="year">${money(p.yearCents)} for a year</option></select>
-              ${chains.length ? `<select name="chain" aria-label="Pay with">${chains.map((ch) => `<option value="${e(ch)}"${ch === defaultChain ? ' selected' : ''}>${e(ch.replace('_', ' on '))}</option>`).join('')}</select>` : ''}
               <button class="btn primary">${current ? 'Extend' : `Get ${p.name}`}</button></form>`
           : `<a class="btn primary" href="/signup?next=/pricing">Get ${p.name}</a>`;
     return `<div class="card plan${key === 'pro' ? ' featured' : ''}${current ? ' current' : ''}">
@@ -220,15 +219,15 @@ ${card('automation', 'For agents and businesses running links at volume.', [
 </div>`;
 }
 
-export function Pricing({ user, plan, chains, defaultChain, paymentsOn }) {
+export function Pricing({ user, plan, paymentsOn }) {
   return layout({
     title: 'Pricing',
     path: '/pricing',
-    description: 'wx93 pricing: Free with an ad page, Pro $5/month, Automation $29/month, or x402 pay per call for agents. Paid in crypto.',
+    description: 'wx93 pricing: Free with an ad page, Pro $5/month, Automation $29/month, or x402 pay per call for agents. Pay with any major coin or PayPal.',
     user,
     body: `<section class="narrow wide"><p class="eyebrow">Pricing</p><h1>Pay for clean links, not for links.</h1>
-<p class="lede">Every plan shortens without limits on clicks. Paid plans are prepaid in crypto through CoinPay (USDC on Polygon by default) and never renew by themselves: pay for a month or a year, extend whenever you like.${paymentsOn ? '' : ' <b>Checkout is being switched on; it will be here shortly.</b>'}</p>
-${planCards({ user, plan, chains, defaultChain })}
+<p class="lede">Every plan shortens without limits on clicks. Paid plans are prepaid through CoinPay with any major coin or PayPal and never renew by themselves: pay for a month or a year, extend whenever you like.${paymentsOn ? '' : ' <b>Checkout is being switched on; it will be here shortly.</b>'}</p>
+${planCards({ user, plan })}
 <div class="card" id="x402"><h3>Agents with no account: x402</h3>
 <p>An agent can pay per call over <a href="https://x402.org">x402</a>, with no signup and no key. ${money(config.x402.priceCents)} buys a pass good for ${config.x402.passMinutes} minutes and up to ${config.x402.passLinks} links, and every link made with it is ad-free for a year. Over the free allowance the API answers <code>402</code> with the offer; or buy one up front at <a href="/x402">/x402</a>.</p></div>
 </section>`,
@@ -265,7 +264,7 @@ export function Docs({ user }) {
 <tr><td><code>GET|POST|DELETE /api/v1/keys</code></td><td>API keys</td></tr>
 <tr><td><code>GET|POST|DELETE /api/v1/webhooks</code></td><td>Automation: <code>{url, events?}</code>; <code>POST /api/v1/webhooks/{id}/test</code></td></tr>
 <tr><td><code>GET|POST|DELETE /api/v1/domains</code></td><td>Automation: <code>{hostname}</code>, then TXT <code>_wx93.&lt;hostname&gt;</code> and <code>POST /api/v1/domains/{id}/verify</code></td></tr>
-<tr><td><code>POST /api/v1/billing/checkout</code></td><td><code>{plan: "pro"|"automation", term: "month"|"year", chain?}</code> → <code>{checkout_url}</code></td></tr>
+<tr><td><code>POST /api/v1/billing/checkout</code></td><td><code>{plan: "pro"|"automation", term: "month"|"year"}</code> → <code>{checkout_url}</code></td></tr>
 <tr><td><code>POST /api/v1/reports</code></td><td><code>{url, reason: phishing|malware|spam|illegal|other, details?}</code></td></tr>
 <tr><td><code>GET /api/v1/health</code></td><td>liveness, with a database round trip</td></tr>
 </table>
