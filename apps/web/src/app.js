@@ -326,7 +326,7 @@ app.get('/share', async (c) => {
 app.get('/pricing', async (c) => {
   const { user } = await caller(c);
   return c.html(
-    P.Pricing({ user, plan: await currentPlan(user), chains: config.coinpay.chains, defaultChain: config.coinpay.defaultChain, paymentsOn: config.coinpay.enabled }),
+    P.Pricing({ user, plan: await currentPlan(user), paymentsOn: config.coinpay.enabled }),
   );
 });
 app.get('/docs', async (c) => c.html(P.Docs({ user: (await caller(c)).user })));
@@ -464,7 +464,7 @@ const sessionUser = async (c) => {
 app.get('/account', async (c) => {
   const user = await sessionUser(c);
   if (!user) return c.redirect('/signin?next=/account', 302);
-  const flash = c.req.query('paid') ? 'Thanks. Your plan switches on as soon as the payment confirms on chain, usually within a minute or two.' : null;
+  const flash = c.req.query('paid') ? 'Thanks. Your plan switches on as soon as the payment confirms, usually within a minute or two.' : null;
   return accountPage(c, user, { flash });
 });
 
@@ -1212,21 +1212,21 @@ app.get('/p/:file{[0-9a-f-]{36}(\\.(vcf|ics))?}', async (c) => {
 
 /* ------------------------------------------------------------------ money -- */
 
-async function startCheckout(user, { plan, term, chain }) {
+async function startCheckout(user, { plan, term }) {
   if (!pay.paymentsEnabled()) throw new HttpError(503, 'payments are being switched on; try again shortly');
   if (!PLANS[plan] || plan === 'free') throw new HttpError(400, 'plan is pro or automation');
   if (!['month', 'year'].includes(term)) throw new HttpError(400, 'term is month or year');
-  const ch = String(chain || config.coinpay.defaultChain).toUpperCase();
-  if (!config.coinpay.chains.includes(ch)) throw new HttpError(400, `chain is one of ${config.coinpay.chains.join(', ')}`);
   const q = await quote(user, plan, term);
   if (q.kind === 'staff') throw new HttpError(400, 'staff accounts are never billed');
   if (q.amount_cents < 50) throw new HttpError(400, 'nothing to pay: your current plan already covers that');
+  // A CoinPay hosted checkout session: the buyer picks any coin or PayPal there.
   const { checkoutUrl, paymentRef } = await pay.createCheckout({
     user,
+    email: user.email,
+    accountId: String(user.id),
     amountCents: q.amount_cents,
     description: `wx93 ${PLANS[plan].name}, one ${term}${q.kind === 'upgrade' ? ' (upgrade, unused Pro credited)' : ''}`,
     metadata: { product: 'plan', plan, term, kind: q.kind },
-    blockchain: ch,
     successUrl: `${config.siteUrl}/account?paid=1`,
     cancelUrl: `${config.siteUrl}/pricing`,
   });
@@ -1238,7 +1238,7 @@ app.post('/billing/checkout', async (c) => {
   if (!user) return c.redirect('/signin?next=/pricing', 303);
   const f = await c.req.parseBody();
   try {
-    const r = await startCheckout(user, { plan: String(f.plan), term: String(f.term || 'month'), chain: f.chain ? String(f.chain) : null });
+    const r = await startCheckout(user, { plan: String(f.plan), term: String(f.term || 'month') });
     return c.redirect(r.checkout_url, 303);
   } catch (err) {
     if (!(err instanceof HttpError)) console.error('[checkout]', err);
@@ -1249,7 +1249,7 @@ app.post('/api/v1/billing/checkout', async (c) => {
   try {
     const { user } = await requireUser(c);
     const b = await body(c);
-    return c.json(await startCheckout(user, { plan: String(b.plan), term: String(b.term || 'month'), chain: b.chain }));
+    return c.json(await startCheckout(user, { plan: String(b.plan), term: String(b.term || 'month') }));
   } catch (err) {
     if (!(err instanceof HttpError)) return c.json({ error: 'could not start checkout', detail: String(err?.message ?? err).slice(0, 200) }, 502);
     return apiError(c, err);
