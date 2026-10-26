@@ -53,7 +53,7 @@ import { crawlGuard, paidPass, trafficGuard } from './throttle.js';
 import { classify, isPrefetch } from './ua.js';
 import { EVENTS, deliver, forgetHooks, newSecret } from './webhooks.js';
 import { refreshFooter } from './footer.js';
-import { refreshRingFooter } from './ring-footer.js';
+import { FOOTER_SCRIPT_SRC, refreshRingFooter } from './ring-footer.js';
 
 export const app = new Hono();
 const here = dirname(fileURLToPath(import.meta.url));
@@ -70,12 +70,14 @@ const csp = ({ tracker = true } = {}) =>
     `default-src 'self' ${SITE_ORIGIN}`,
     "img-src 'self' data: https:",
     `style-src 'self' ${SITE_ORIGIN} 'unsafe-inline'`,
-    tracker ? `script-src 'self' ${CRAWLPROOF} ${SITE_ORIGIN}` : "script-src 'self'",
-    tracker ? `connect-src 'self' ${CRAWLPROOF}` : "connect-src 'self'",
+    // FOOTER_SCRIPT_SRC: the footer newsletter form's inline script (hash), which posts to pit.world.
+    // The bare interstitial has no footer and stays script-free.
+    tracker ? `script-src 'self' ${CRAWLPROOF} ${SITE_ORIGIN} ${FOOTER_SCRIPT_SRC}` : "script-src 'self'",
+    tracker ? `connect-src 'self' ${CRAWLPROOF} https://pit.world` : "connect-src 'self'",
     `frame-src ${adFrameOrigins({ site: tracker }).join(' ') || "'none'"}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
-    "form-action 'self' https://coinpayportal.com http://127.0.0.1:* http://localhost:*",
+    "form-action 'self' https://coinpayportal.com https://pit.world http://127.0.0.1:* http://localhost:*",
     "object-src 'none'",
   ].join('; ');
 
