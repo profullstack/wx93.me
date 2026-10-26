@@ -1,6 +1,6 @@
 # One image: the Bun web app, its REST API, the hosted MCP endpoint, and the
 # bundled CLI the curl installer downloads. dev2 builds this on every merge to main.
-FROM oven/bun:1.4.2-slim AS build
+FROM oven/bun:1.4.4-slim AS build
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gzip && rm -rf /var/lib/apt/lists/*
 COPY package.json bun.lock* ./
@@ -23,7 +23,7 @@ RUN mkdir -p /geo && for db in city country; do for m in "$(date -u +%Y-%m)" "$(
 # dev2's umask 007 leaves copied files unreadable to the bun user otherwise.
 RUN chmod -R a+rX /app
 
-FROM oven/bun:1.4.2-slim
+FROM oven/bun:1.4.4-slim
 WORKDIR /app
 COPY --from=build /app /app
 # Bun.mmap opens its file read-write even for a private mapping, so the databases
