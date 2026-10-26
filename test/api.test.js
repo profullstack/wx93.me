@@ -478,7 +478,9 @@ d('signup profile (@profullstack/profile)', () => {
     const signup = await (await req('/signup')).text();
     for (const name of ['first_name', 'last_name', 'company_domain', 'job_title', 'linkedin_url'])
       expect(signup.match(new RegExp(`name="${name}"`, 'g'))?.length).toBe(1);
-    expect(signup.match(/name="email"/g)?.length).toBe(1);
+    // The shared footer's newsletter form (@profullstack/footer 0.3+) has its own email field.
+    const signupForm = signup.slice(0, signup.indexOf('class="pfs-footer'));
+    expect(signupForm.match(/name="email"/g)?.length).toBe(1);
     expect(signup).toContain('name="mode" value="signup"');
     expect(signup).toContain('src="/assets/profile.js"');
     const signin = await (await req('/signin')).text();
