@@ -1,3 +1,4 @@
+import { COLUMNS as PROFILE_COLUMNS, renderProfileFields } from '@profullstack/profile';
 import { adNetworkMeta, renderAd } from './ads.js';
 import { siteFooter } from './footer.js';
 import { ringFooter } from './ring-footer.js';
@@ -337,11 +338,19 @@ curl -s ${e(s)}/api/v1/links -H "x-crawl-pass: $(node -p "require('./pass.json')
   });
 }
 
-export function SignIn({ signup = false, error, next = '', guardFields = '', user }) {
+/*
+ * The rest of the shared profile (@profullstack/profile), asked for on the signup
+ * page only. Email is this form's own box, so the package renders the other five.
+ * A plain sign-in never sees or needs them: the same link still makes an account.
+ */
+const PROFILE_FIELDS = PROFILE_COLUMNS.filter((f) => f !== 'email');
+
+export function SignIn({ signup = false, error, next = '', guardFields = '', user, values = {}, errors = {} }) {
   return layout({
     title: signup ? 'Sign up' : 'Sign in',
     path: signup ? '/signup' : '/signin',
     user,
+    head: signup ? '<script src="/assets/profile.js" defer></script>' : '',
     body: `<section class="narrow">
 <p class="eyebrow">${signup ? 'Sign up' : 'Sign in'}</p>
 <h1>${signup ? 'Make an account with your email.' : 'Welcome back.'}</h1>
@@ -349,7 +358,10 @@ export function SignIn({ signup = false, error, next = '', guardFields = '', use
 ${error ? `<p class="error">${e(error)}</p>` : ''}
 <form method="post" action="/auth/link" class="card stack">
 <label for="email">Email</label>
-<input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com">
+<input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com"${values.email ? ` value="${e(values.email)}"` : ''}>
+${errors.email ? `<p class="pfs-profile__error" role="alert">${e(errors.email)}</p>` : ''}
+${signup ? `<input type="hidden" name="mode" value="signup">
+${renderProfileFields({ fields: PROFILE_FIELDS, values, errors })}` : ''}
 <input type="hidden" name="next" value="${e(next)}">
 ${guardFields}
 <button class="btn primary">${signup ? 'Email me a sign-up link' : 'Email me a sign-in link'}</button>
@@ -370,7 +382,7 @@ export function Sent({ email, user }) {
   });
 }
 
-export function Account({ user, plan, links, usage, keys, passkeys, hooks, domains, billing, created, flash }) {
+export function Account({ user, plan, links, usage, keys, passkeys, hooks, domains, billing, created, flash, contact = {}, contactErrors = {} }) {
   const rows = links
     .map(
       (l) => `<tr><td><a href="${e(l.short_url)}" class="mono">${e(l.short_url.replace(/^https?:\/\//, ''))}</a>${l.disabled ? ' <span class="pill bad">disabled</span>' : ''}</td>
@@ -408,6 +420,13 @@ ${plan.aliases ? `<div class="row"><label>${e(config.host)}/<input name="alias" 
 
 <h2>Your links</h2>
 ${links.length ? `<table class="tbl links"><tr><th>Short</th><th>Destination</th><th>People</th><th></th></tr>${rows}</table>` : '<p class="muted">None yet.</p>'}
+
+<h2 id="contact">Contact details</h2>
+<p class="muted">Private to your account. Sent with ${e(user.email)}.</p>
+<form method="post" action="/account/profile" class="card stack">
+${renderProfileFields({ fields: PROFILE_FIELDS, values: contact ?? {}, errors: contactErrors })}
+<button class="btn">Save contact details</button>
+</form>
 
 <h2 id="keys">API keys</h2>
 ${
