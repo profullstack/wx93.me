@@ -5,6 +5,7 @@
  *   wx93 login [--manual] | login --key wx93_live_…
  *   wx93 ls | stats <code> | get <code> | rm <code> | qr <code> | expand <url> | bulk <file>
  *   wx93 keys [create NAME | revoke ID] | whoami | upgrade-plan pro|automation [month|year]
+ *   wx93 redeem CODE | invites [create [NOTE]]
  *   wx93 tui | mcp | upgrade | uninstall | version
  */
 import { spawnSync } from 'node:child_process';
@@ -36,6 +37,8 @@ const HELP = `wx93: short links for people and agents (https://wx93.me)
   wx93 bulk FILE|-               one URL per line (Automation)
   wx93 keys [create NAME | revoke ID]
   wx93 plan pro|automation [month|year]   open a crypto checkout
+  wx93 redeem CODE               redeem a credit code for days of Pro
+  wx93 invites [create [NOTE]]   your invite links (3 per account; both sides get a week of Pro)
   wx93 tui                       everything above, as a screen
   wx93 mcp                       stdio MCP server for agents
   wx93 upgrade | uninstall | version
@@ -186,6 +189,25 @@ export async function main(argv = process.argv.slice(2)) {
     case 'plan': {
       const r = await api.checkout(auth, need(rest[0], 'wx93 plan pro|automation [month|year]'), rest[1] ?? 'month', flags.chain);
       out(r, `Pay here (crypto, ${(r.quote.amount_cents / 100).toFixed(2)} USD):\n${r.checkout_url}`);
+      return 0;
+    }
+    case 'redeem': {
+      const r = await api.redeem(auth, need(rest[0], 'wx93 redeem CR-XXXX-XXXX-XXXX-XXXX'));
+      out(r, `Redeemed: ${r.days} days of Pro. Plan now: ${r.plan}.`);
+      return 0;
+    }
+    case 'invites':
+    case 'invite': {
+      if (rest[0] === 'create' || rest[0] === 'new') {
+        const r = await api.createInvite(auth, rest.slice(1).join(' ') || undefined);
+        out(r, `${r.url}\n(works once, for one new account; shown once)`);
+        return 0;
+      }
+      const r = await api.invites(auth);
+      out(
+        r,
+        [`${r.quota.left} of ${r.quota.total} invites left; ${r.accepted} joined.`, ...r.invites.map((i) => `${i.id}  ${i.used ? 'joined' : i.revoked ? 'withdrawn' : 'open'}  ${i.note ?? ''}`)].join('\n'),
+      );
       return 0;
     }
     case 'tui': {

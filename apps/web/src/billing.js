@@ -15,7 +15,7 @@ export const TERM_MS = { month: 30 * 86400_000, year: 365 * 86400_000 };
 const priceOf = (plan, term) => PLANS[plan]?.[`${term}Cents`];
 
 const periodsFor = (sql, userId) =>
-  sql`select id, plan, term, starts_at, ends_at from plan_periods
+  sql`select id, plan, term, starts_at, ends_at, grant_source from plan_periods
       where user_id = ${userId} and ends_at > now() order by starts_at`;
 
 /** The plan in force right now. Staff are Automation and never billed. */
@@ -47,9 +47,10 @@ export function priceQuote({ now, current, staff, periods, target, term }) {
   const price = priceOf(target, term);
   if (staff) return { kind: 'staff', amount_cents: 0, credit_cents: 0, starts_at: null, ends_at: null };
   if (current === 'pro' && target === 'automation') {
-    // Credit every unused Pro day, current and queued, at what was paid for it.
+    // Credit every unused PAID Pro day, current and queued, at what was paid for it.
+    // Days from a credit code or an invite were never paid for and are worth nothing here.
     let credit = 0;
-    for (const p of periods.filter((x) => x.plan === 'pro')) {
+    for (const p of periods.filter((x) => x.plan === 'pro' && !x.grant_source)) {
       const start = Math.max(now, new Date(p.starts_at).getTime());
       const end = new Date(p.ends_at).getTime();
       if (end > start) credit += ((end - start) / TERM_MS[p.term]) * priceOf('pro', p.term);
@@ -81,9 +82,11 @@ export async function applyPurchase(tx, { userId, plan, term, kind, paymentId })
   if (already.length) return null;
   const ms = TERM_MS[term];
   if (kind === 'upgrade') {
-    await tx`delete from plan_periods where user_id = ${userId} and plan = 'pro' and starts_at > now()`;
+    // Paid Pro time was credited in the quote, so it ends now. Granted Pro days were not,
+    // so they are left alone: they run under Automation and outlast it if they are longer.
+    await tx`delete from plan_periods where user_id = ${userId} and plan = 'pro' and grant_source is null and starts_at > now()`;
     await tx`update plan_periods set ends_at = greatest(starts_at + interval '1 second', now())
-             where user_id = ${userId} and plan = 'pro' and starts_at <= now() and ends_at > now()`;
+             where user_id = ${userId} and plan = 'pro' and grant_source is null and starts_at <= now() and ends_at > now()`;
     const [p] = await tx`
       insert into plan_periods (user_id, plan, term, starts_at, ends_at, payment_id)
       values (${userId}, ${plan}, ${term}, now(), now() + ${`${ms / 1000} seconds`}::interval, ${paymentId})
@@ -104,7 +107,7 @@ export async function billingState(user, sql = db()) {
   const periods = plan.staff ? [] : await periodsFor(sql, user.id);
   return {
     plan: { key: plan.key, name: plan.name, staff: plan.staff, paid_through: plan.paid_through },
-    periods: periods.map((p) => ({ plan: p.plan, term: p.term, starts_at: p.starts_at, ends_at: p.ends_at })),
+    periods: periods.map((p) => ({ plan: p.plan, term: p.term, starts_at: p.starts_at, ends_at: p.ends_at, granted: Boolean(p.grant_source) })),
     coverage_end: periods.length ? periods[periods.length - 1].ends_at : null,
   };
 }

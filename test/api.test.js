@@ -547,3 +547,140 @@ d('signup profile (@profullstack/profile)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+d('credit codes and invites', () => {
+  const magic = async (email, opts = {}) => {
+    const url = new URL(await auth.createLoginLink(email, opts));
+    return req(url.pathname + url.search, { headers: opts.cookie ? { cookie: opts.cookie } : {} });
+  };
+  const cookieOf = (res) =>
+    res.headers
+      .getSetCookie()
+      .map((c) => c.split(';')[0])
+      .find((c) => c.startsWith('wx93_session='));
+  const planOf = async (cookie) => (await (await req('/api/v1/me', { headers: { cookie } })).json()).plan;
+
+  test('staff mint a pro_days code; it redeems once, adds days of Pro, and is refused after', async () => {
+    const staff = await signIn('staff@example.test');
+    const mint = await req('/admin/credits', { method: 'POST', headers: { cookie: staff.cookie, 'content-type': 'application/x-www-form-urlencoded' }, body: 'days=30&max_redemptions=1&label=Preshy' });
+    const page = await mint.text();
+    const code = page.match(/value="(CR-[0-9A-Z-]+)"/)[1];
+    expect(page).toContain('Preshy');
+    // Only the hash is stored.
+    const [{ n }] = await db()`select count(*)::int as n from credit_codes where hash = ${code}`;
+    expect(n).toBe(0);
+
+    const bob = await signIn('credit-bob@acme.example');
+    expect(await planOf(bob.cookie)).toMatchObject({ key: 'free' });
+    const r = await req('/api/v1/credits/redeem', { method: 'POST', headers: { cookie: bob.cookie }, json: { code: code.toLowerCase().replace(/-/g, ' ') } });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ ok: true, unit: 'pro_days', days: 30, plan: 'pro' });
+    const [p] = await db()`select grant_source, ends_at - starts_at as span from plan_periods where user_id = ${bob.user.id}`;
+    expect(p.grant_source).toMatch(/^code:/);
+
+    const again = await req('/api/v1/credits/redeem', { method: 'POST', headers: { cookie: bob.cookie }, json: { code } });
+    expect(again.status).toBe(400);
+    expect((await again.json()).reason).toBe('already_redeemed');
+    const carol = await signIn('credit-carol@acme.example');
+    const used = await req('/account/redeem', { method: 'POST', headers: { cookie: carol.cookie, 'content-type': 'application/x-www-form-urlencoded' }, body: `code=${code}` });
+    expect(await used.text()).toContain('already been used');
+    const [{ periods }] = await db()`select count(*)::int as periods from plan_periods where user_id = ${carol.user.id}`;
+    expect(periods).toBe(0);
+  });
+
+  test('only staff can mint', async () => {
+    const eve = await signIn('mint-eve@acme.example');
+    expect((await req('/api/v1/admin/credits', { method: 'POST', headers: { cookie: eve.cookie }, json: { days: 365 } })).status).toBe(403);
+    expect((await req('/admin/credits', { method: 'POST', headers: { cookie: eve.cookie, 'content-type': 'application/x-www-form-urlencoded' }, body: 'days=365' })).status).toBe(303);
+  });
+
+  test('granted days are not money: an upgrade credits none of them, and a paid month queues after them', async () => {
+    const { priceQuote } = await import('../apps/web/src/billing.js');
+    const now = Date.now();
+    const periods = [{ plan: 'pro', term: 'month', starts_at: new Date(now - 86400_000), ends_at: new Date(now + 20 * 86400_000), grant_source: 'code:x' }];
+    expect(priceQuote({ now, current: 'pro', staff: false, periods, target: 'automation', term: 'month' }).credit_cents).toBe(0);
+    const { grantProDays } = await import('../apps/web/src/credits.js');
+    const u = await auth.findOrCreateUser('grant-twice@acme.example');
+    expect(await grantProDays(u.id, 10, 'test:once')).not.toBeNull();
+    expect(await grantProDays(u.id, 10, 'test:once')).toBeNull();
+  });
+
+  test('/i/<code> sets the invite, the emailed link carries it, and both sides get the bonus once', async () => {
+    const ann = await signIn('inviter-ann@acme.example');
+    const made = await req('/api/v1/invites', { method: 'POST', headers: { cookie: ann.cookie }, json: { note: 'for Dan' } });
+    expect(made.status).toBe(201);
+    const inv = await made.json();
+    expect(inv.url).toBe(`${SITE}/i/${inv.code}`);
+
+    // The landing page is never behind the throttle, and answers with the cookie.
+    const land = await req(`/i/${inv.code}`, { headers: { 'user-agent': CHROME } });
+    expect(land.status).toBe(200);
+    expect(land.headers.get('set-cookie')).toContain(`wx93_invite=${inv.code}`);
+    const signup = await req('/signup', { headers: { cookie: `wx93_invite=${inv.code}` } });
+    expect(await signup.text()).toContain(`name="invite" value="${inv.code}"`);
+
+    // Opened in another browser: no cookie, the invite rides the link.
+    const spent = await magic('invitee-dan@newco.example', { invite: inv.code });
+    expect(spent.status).toBe(302);
+    expect(spent.headers.get('location')).toBe('/account?invited=1');
+    const dan = cookieOf(spent);
+    expect(await planOf(dan)).toMatchObject({ key: 'pro' });
+    expect(await planOf(ann.cookie)).toMatchObject({ key: 'pro' });
+    expect(await (await req('/account?invited=1', { headers: { cookie: dan } })).text()).toContain('Your invite added 7 days of Pro');
+
+    // Used: nobody else can take it, and Dan cannot take a second invite.
+    const again = await magic('invitee-erin@newco.example', { invite: inv.code });
+    expect(again.headers.get('location')).toBe('/account');
+    const second = await (await req('/api/v1/invites', { method: 'POST', headers: { cookie: ann.cookie }, json: {} })).json();
+    const danUser = (await db()`select * from users where email = 'invitee-dan@newco.example'`)[0];
+    const { acceptInvite } = await import('../apps/web/src/credits.js');
+    expect((await acceptInvite({ ...danUser }, second.code, { created: true })).ok).toBe(false);
+
+    const state = await (await req('/api/v1/invites', { headers: { cookie: ann.cookie } })).json();
+    expect(state).toMatchObject({ quota: { total: 3, used: 2, left: 1 }, accepted: 1, bonus_days: 7 });
+    expect(JSON.stringify(state)).not.toContain('invitee-dan');
+  });
+
+  test('no bonus for an existing account, a throwaway address or a mailbox alias of an account', async () => {
+    const ann = await signIn('inviter-gate@acme.example');
+    const code = async () => (await (await req('/api/v1/invites', { method: 'POST', headers: { cookie: ann.cookie }, json: {} })).json()).code;
+
+    const c1 = await code();
+    await auth.findOrCreateUser('already-here@acme.example');
+    const old = await magic('already-here@acme.example', { invite: c1 });
+    expect(old.headers.get('location')).toBe('/account');
+
+    const throwaway = await magic('someone@mailinator.com', { invite: c1 });
+    expect(throwaway.headers.get('location')).toBe('/account');
+
+    await auth.findOrCreateUser('real.person@gmail.com');
+    const alias = await magic('realperson+wx@gmail.com', { invite: c1 });
+    expect(alias.headers.get('location')).toBe('/account');
+
+    // Still unused after three refusals.
+    const fine = await magic('fresh-person@otherco.example', { invite: c1 });
+    expect(fine.headers.get('location')).toBe('/account?invited=1');
+    const [{ n }] = await db()`select count(*)::int as n from invite_bonuses where inviter_id = ${ann.user.id}`;
+    expect(n).toBe(1);
+  });
+
+  test('invite paths never collide with short links', async () => {
+    const { aliasProblem } = await import('../apps/web/src/codes.js');
+    for (const a of ['invites', 'Invites', 'redeem', 'credits', 'invite']) expect(aliasProblem(a)).toContain('reserved');
+    const bad = await req('/i/<script>', { headers: { 'user-agent': CHROME } });
+    expect(bad.status).toBe(404);
+    // On the second short domain the invite pages go to the brand host.
+    const alt = await req('/i/INV-AAAA-BBBB-CCCC', { headers: { host: '9xq.me' } });
+    expect(alt.status).toBe(301);
+    expect(alt.headers.get('location')).toBe(`${SITE}/i/INV-AAAA-BBBB-CCCC`);
+  });
+
+  test('sign-in next only goes to a same-origin path', async () => {
+    const u = 'next-check@acme.example';
+    for (const next of ['/\\evil.example', '//evil.example', '/\t/evil.example']) {
+      const url = new URL(await auth.createLoginLink(u));
+      const res = await req(`${url.pathname}${url.search}&next=${encodeURIComponent(next)}`);
+      expect(res.headers.get('location')).toBe('/account');
+    }
+  });
+});

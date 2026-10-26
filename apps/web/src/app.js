@@ -14,12 +14,13 @@ import {
   validateProfile,
 } from '@profullstack/profile';
 import { Hono } from 'hono';
-import { getCookie } from 'hono/cookie';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { checkDestination, checkShape, DestinationError, feedStatus } from './abuse.js';
 import { adFrameOrigins } from './ads.js';
 import * as auth from './auth.js';
 import { applyPurchase, billingState, currentPlan, quote } from './billing.js';
 import { aliasProblem, CODE_PATH, RESERVED } from './codes.js';
+import * as K from './credits.js';
 import { config, PLANS } from './config.js';
 import { clientIp, placeOf } from './geo.js';
 import { installScript } from './install.js';
@@ -103,7 +104,8 @@ app.use('*', async (c, next) => {
 });
 
 const guard = trafficGuard();
-for (const p of ['/api/*', '/auth/*', '/oauth/*', '/shorten', '/report', '/mcp', '/billing/*', '/account/*', '/admin/*', '/x402', '/qr', '/qr/make.svg', '/qr/make.png', '/qr/make.pdf'])
+// Not /i/<code>: an invite landing is a link people click from chat and mail, and must never answer 402.
+for (const p of ['/api/*', '/auth/*', '/oauth/*', '/shorten', '/report', '/mcp', '/billing/*', '/account/*', '/admin/*', '/x402', '/qr', '/qr/make.svg', '/qr/make.png', '/qr/make.pdf', '/invites', '/invites/*'])
   app.use(p, guard);
 
 // A cross-site form post cannot ride the Lax session cookie, but say no to a foreign Origin anyway.
@@ -353,6 +355,7 @@ for (const [path, signup] of [
       P.SignIn({
         signup,
         next: c.req.query('next') ?? '',
+        invite: inviteFrom(c),
         error: c.req.query('error') === 'expired' ? 'That link has expired or was already used. Ask for a new one.' : null,
         guardFields: await guardFields('signin'),
         user: (await caller(c)).user,
@@ -407,7 +410,7 @@ app.post('/auth/link', async (c) => {
     const check = validateProfile(fields);
     if (!check.ok)
       return c.html(
-        P.SignIn({ signup: true, next: String(fields.next ?? ''), values: fields, errors: check.errors, guardFields: await guardFields('signin') }),
+        P.SignIn({ signup: true, next: String(fields.next ?? ''), invite: inviteFrom(c, fields.invite), values: fields, errors: check.errors, guardFields: await guardFields('signin') }),
         400,
       );
     profile = check.profile;
@@ -416,7 +419,7 @@ app.post('/auth/link', async (c) => {
   // Answer the same whatever happens next: a different answer for a known address enumerates accounts.
   if (verdict.action !== 'drop' && verdict.action !== 'limited' && auth.EMAIL.test(email)) {
     try {
-      await sendLoginLink({ email, url: await auth.createLoginLink(email, { next: String(fields.next ?? ''), profile }) });
+      await sendLoginLink({ email, url: await auth.createLoginLink(email, { next: String(fields.next ?? ''), profile, invite: inviteFrom(c, fields.invite) }) });
     } catch (err) {
       console.error(`[auth] could not send link: ${err?.message ?? err}`);
     }
@@ -435,9 +438,22 @@ app.get('/auth/magic', async (c) => {
     await saveSignupProfile(profiles, s.user.id, s.profile, { email: s.user.email }).catch((err) =>
       console.error(`[auth] signup profile save failed: ${err?.message ?? err}`),
     );
-  c.header('set-cookie', auth.sessionCookie(s.sessionId));
-  const next = c.req.query('next');
-  return c.redirect(next && next.startsWith('/') && !next.startsWith('//') ? next : '/account', 302);
+  // An invite rides on the emailed link (so another browser still counts it), or on the
+  // cookie /i/<code> set in this one. Only a brand-new account can take it.
+  const invite = s.invite ?? inviteFrom(c);
+  let invited = null;
+  if (invite && s.created) {
+    invited = await K.acceptInvite(s.user, invite, { created: s.created }).catch((err) => {
+      console.error(`[invite] accept failed: ${err?.message ?? err}`);
+      return null;
+    });
+    if (invited && !invited.ok) console.log(`[invite] not accepted for ${s.user.id}: ${invited.reason}`);
+  }
+  if (invite) deleteCookie(c, K.INVITE_COOKIE, { path: '/' });
+  c.header('set-cookie', auth.sessionCookie(s.sessionId), { append: true });
+  const next = auth.safeNext(c.req.query('next'));
+  if (invited?.ok) return c.redirect('/account?invited=1', 302);
+  return c.redirect(next || '/account', 302);
 });
 
 app.post('/auth/signout', async (c) => {
@@ -523,8 +539,114 @@ const sessionUser = async (c) => {
 app.get('/account', async (c) => {
   const user = await sessionUser(c);
   if (!user) return c.redirect('/signin?next=/account', 302);
-  const flash = c.req.query('paid') ? 'Thanks. Your plan switches on as soon as the payment confirms, usually within a minute or two.' : null;
+  const [bonus] = c.req.query('invited') ? await db()`select days from invite_bonuses where invitee_id = ${user.id}` : [];
+  const flash = c.req.query('paid')
+    ? 'Thanks. Your plan switches on as soon as the payment confirms, usually within a minute or two.'
+    : bonus
+      ? `Welcome. Your invite added ${Number(bonus.days)} days of Pro to this account.`
+      : null;
   return accountPage(c, user, { flash });
+});
+
+/* ------------------------------------------------------- codes + invites -- */
+
+/** The invite code a request carries: a form field first, then the /i/<code> cookie. */
+function inviteFrom(c, field) {
+  const v = String(field ?? '') || getCookie(c, K.INVITE_COOKIE) || '';
+  return K.INVITE_PATH.test(v) ? v : '';
+}
+
+const redeemFlash = (r) => `Code redeemed: ${r.days} days of Pro${r.period ? `, through ${String(new Date(r.period.ends_at).toISOString()).slice(0, 10)}` : ''}.`;
+
+app.post('/account/redeem', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin?next=/account', 303);
+  const f = await c.req.parseBody();
+  try {
+    const r = await K.redeemCode(user, f.code);
+    return accountPage(c, user, { flash: redeemFlash(r) });
+  } catch (err) {
+    if (!(err instanceof K.CodeError)) console.error('[redeem]', err);
+    return accountPage(c, user, { redeemError: err instanceof K.CodeError ? err.message : 'That did not work on our side. Try again in a minute.' });
+  }
+});
+
+app.post('/api/v1/credits/redeem', async (c) => {
+  try {
+    const { user } = await requireUser(c);
+    const b = await body(c);
+    if (!b.code) throw new HttpError(400, 'send {"code": "CR-XXXX-XXXX-XXXX-XXXX"}');
+    const r = await K.redeemCode(user, b.code);
+    return c.json({ ok: true, unit: K.UNIT, days: r.days, plan: (await currentPlan(user)).key, period: r.period });
+  } catch (err) {
+    if (err instanceof K.CodeError) return c.json({ ok: false, error: err.message, reason: err.reason }, 400);
+    return apiError(c, err);
+  }
+});
+
+const inviteUrl = (code) => `${config.siteUrl}/i/${encodeURIComponent(code)}`;
+
+async function invitesPage(c, user, extra = {}) {
+  const state = await K.inviteState(user.id);
+  return c.html(P.Invites({ user, ...state, invites: state.invites.map(K.publicInvite), days: K.INVITE_DAYS, ...extra }));
+}
+app.get('/invites', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin?next=/invites', 302);
+  return invitesPage(c, user);
+});
+app.post('/invites', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin?next=/invites', 303);
+  const f = await c.req.parseBody();
+  try {
+    const inv = await K.getAffiliates().createInvite(user.id, String(f.note ?? '').slice(0, 80));
+    return invitesPage(c, user, { created: { code: inv.code, url: inviteUrl(inv.code) } });
+  } catch (err) {
+    if (!/no invites left/.test(String(err?.message))) console.error('[invites]', err);
+    return invitesPage(c, user, { error: /no invites left/.test(String(err?.message)) ? 'You have used all your invites.' : 'That did not work on our side.' });
+  }
+});
+app.post('/invites/:id/revoke', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin?next=/invites', 303);
+  const mine = (await K.getAffiliates().invites(user.id)).find((i) => i.id === c.req.param('id'));
+  if (mine && !mine.usedBy) await K.getAffiliates().revokeInvite(mine.id);
+  return c.redirect('/invites', 303);
+});
+app.get('/api/v1/invites', async (c) => {
+  try {
+    const { user } = await requireUser(c);
+    const s = await K.inviteState(user.id);
+    return c.json({ quota: s.quota, accepted: s.accepted, bonus_days: K.INVITE_DAYS, invites: s.invites.map(K.publicInvite) });
+  } catch (err) {
+    return apiError(c, err);
+  }
+});
+app.post('/api/v1/invites', async (c) => {
+  try {
+    const { user } = await requireUser(c);
+    const b = await body(c);
+    const inv = await K.getAffiliates().createInvite(user.id, String(b.note ?? '').slice(0, 80));
+    return c.json({ code: inv.code, url: inviteUrl(inv.code), expires_at: inv.expiresAt ? new Date(inv.expiresAt).toISOString() : null, bonus_days: K.INVITE_DAYS }, 201);
+  } catch (err) {
+    if (/no invites left/.test(String(err?.message))) return c.json({ error: 'no invites left' }, 409);
+    return apiError(c, err);
+  }
+});
+
+/**
+ * An invite link. Remembers the code in a cookie (and on the sign-up form, which puts
+ * it on the emailed link) and says what it is worth. Never behind the rate limit or a
+ * paywall, and it never touches the short-link table: /i/ is two segments, and "i" is reserved.
+ */
+app.get('/i/:code', async (c) => {
+  const raw = c.req.param('code');
+  const code = K.INVITE_PATH.test(raw) ? raw : '';
+  const { user } = await caller(c);
+  if (code && !user)
+    setCookie(c, K.INVITE_COOKIE, code, { path: '/', httpOnly: true, sameSite: 'Lax', secure: config.isProd, maxAge: 30 * 86400 });
+  return c.html(P.InviteLanding({ user, code, days: K.INVITE_DAYS }), code ? 200 : 404, { 'x-robots-tag': 'noindex', 'cache-control': 'private, no-store', 'referrer-policy': 'no-referrer' });
 });
 
 app.post('/account/profile', async (c) => {
@@ -1414,12 +1536,52 @@ const adminUser = async (c) => {
 app.get('/admin', async (c) => {
   const user = await adminUser(c);
   if (!user) return c.redirect('/signin', 302);
+  return adminWith(c, user, null);
+});
+const mintInput = (b) => ({
+  days: b.days,
+  label: b.label ?? '',
+  maxRedemptions: b.max_redemptions ?? b.max ?? 1,
+  expiresAt: b.expires_at ? new Date(String(b.expires_at)).getTime() || null : b.expires_days ? Date.now() + Number(b.expires_days) * 86400_000 : null,
+});
+app.post('/admin/credits', async (c) => {
+  const user = await adminUser(c);
+  if (!user) return c.redirect('/signin', 303);
+  const f = await c.req.parseBody();
+  let minted;
+  try {
+    minted = await K.mintCode({ ...mintInput(f), createdBy: user.email });
+  } catch (err) {
+    minted = { error: String(err?.message ?? err) };
+  }
+  return adminWith(c, user, minted);
+});
+async function adminWith(c, user, minted) {
   const reports = await db()`
     select r.link_id, max(r.reported) as reported, l.code, l.url, l.disabled_at, mode() within group (order by r.reason) as reason,
            count(distinct r.reporter)::int as reporters, max(r.created_at) as last
     from reports r left join links l on l.id = r.link_id
     where r.resolved_at is null group by r.link_id, l.code, l.url, l.disabled_at order by last desc limit 200`;
-  return c.html(P.Admin({ user, reports, feed: feedStatus() }));
+  const codes = await K.getCredits().list().catch(() => []);
+  return c.html(P.Admin({ user, reports, feed: feedStatus(), codes, minted }));
+}
+app.post('/admin/credits/:id/revoke', async (c) => {
+  if (!(await adminUser(c))) return c.redirect('/signin', 303);
+  await K.getCredits().revoke(c.req.param('id')).catch(() => {});
+  return c.redirect('/admin#credits', 303);
+});
+app.post('/api/v1/admin/credits', async (c) => {
+  try {
+    const who = await requireUser(c);
+    if (!who.user.is_admin) throw new HttpError(403, 'staff only');
+    const b = await body(c);
+    const m = await K.mintCode({ ...mintInput(b), createdBy: who.user.email }).catch((err) => {
+      throw new HttpError(400, String(err?.message ?? err));
+    });
+    return c.json({ code: m.code, id: m.id, unit: K.UNIT, days: m.grant.amount, max_redemptions: m.maxRedemptions, expires_at: m.expiresAt ? new Date(m.expiresAt).toISOString() : null, redeem_at: `${config.siteUrl}/account#redeem` }, 201);
+  } catch (err) {
+    return apiError(c, err);
+  }
 });
 app.post('/admin/links/:id/:action{disable|enable}', async (c) => {
   if (!(await adminUser(c))) return c.redirect('/signin', 303);
@@ -1531,6 +1693,10 @@ POST ${config.siteUrl}/api/v1/links  {"url": "https://...", "alias"?: "...", "ex
 - No account: GET|POST /qr/make.svg|.png|.pdf?type=wifi&ssid=...&password=... (static, nothing saved)
 - Two short domains, one namespace: every code works on wx93.me and 9xq.me. Pick the one a link is shown with by "domain": "9xq.me".
 - POST /api/v1/reports {"url", "reason": "phishing|malware|spam|illegal|other"}
+
+## Credit codes and invites (sign in)
+- POST /api/v1/credits/redeem {"code": "CR-XXXX-XXXX-XXXX-XXXX"} -> days of Pro added to the account
+- GET /api/v1/invites, POST /api/v1/invites {"note"?} -> {"code", "url": "${config.siteUrl}/i/INV-..."}. Three per account; a new account that signs up through one gets ${K.INVITE_DAYS} days of Pro, and so does the inviter.
 
 ## Tools
 - MCP (stdio): npx -y @profullstack/wx93-mcp

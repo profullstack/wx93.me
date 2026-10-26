@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createTokenStore, getAccessToken } from '@profullstack/auth-system/cli';
 
-export const VERSION = '0.2.1';
+export const VERSION = '0.3.0';
 export const DEFAULT_SERVER = 'https://wx93.me';
 export const CONFIG_FILE = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'wx93', 'config.json');
 
@@ -122,6 +122,9 @@ export const createKey = (auth, name) => call(auth, '/keys', post({ name }));
 export const revokeKey = (auth, id) => call(auth, `/keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
 export const checkout = (auth, plan, term, chain) => call(auth, '/billing/checkout', post({ plan, term, chain }));
 export const report = (auth, body) => call(auth, '/reports', post(body));
+export const redeem = (auth, code) => call(auth, '/credits/redeem', post({ code }));
+export const invites = (auth) => call(auth, '/invites');
+export const createInvite = (auth, note) => call(auth, '/invites', post({ note }));
 
 const qrId = (id) => encodeURIComponent(String(id));
 export const qrTypes = (auth) => call(auth, '/qr/types');

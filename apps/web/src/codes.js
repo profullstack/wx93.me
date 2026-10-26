@@ -21,7 +21,7 @@ export const ALIAS = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
  */
 export const RESERVED = new Set(
   [
-    'about', 'account', 'admin', 'api', 'app', 'assets', 'auth', 'billing', 'blog', 'crawl',
+    'about', 'account', 'admin', 'api', 'app', 'assets', 'auth', 'billing', 'blog', 'crawl', 'credits', 'i', 'invite', 'invites', 'redeem',
     'dashboard', 'desktop', 'dl', 'docs', 'download', 'favicon', 'healthz', 'help', 'icons',
     'install', 'install-mcp', 'legal', 'links', 'llms', 'login', 'logout', 'manifest', 'mcp', 'new', 'oauth', 'offline',
     'pricing', 'privacy', 'qr', 'report', 'robots', 'security', 'settings', 'share', 'signin', 'signout',

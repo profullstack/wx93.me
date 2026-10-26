@@ -170,6 +170,21 @@ export const TOOLS = [
     },
   },
   { name: 'whoami', description: 'The signed-in account, its plan and this month\'s usage.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  {
+    name: 'redeem_credit_code',
+    description: 'Redeem a wx93 credit code (CR-XXXX-XXXX-XXXX-XXXX) on the signed-in account. It adds days of the Pro plan.',
+    inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false },
+  },
+  {
+    name: 'list_invites',
+    description: 'The signed-in account\'s invite links: how many are left (3 per account) and which were used.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'create_invite',
+    description: 'Make one invite link (single use, 30 days). A new account that signs up through it gets a week of Pro, and so does the inviter. The link is shown once.',
+    inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Who it is for; only the inviter sees it.' } }, additionalProperties: false },
+  },
 ];
 
 /** A QR code as JSON plus its picture, so a client that shows images shows it. */
@@ -226,6 +241,12 @@ export async function callTool(auth, name, args = {}) {
       return text(await api.expand(auth, args.url));
     case 'whoami':
       return text(await api.me(auth));
+    case 'redeem_credit_code':
+      return text(await api.redeem(auth, args.code));
+    case 'list_invites':
+      return text(await api.invites(auth));
+    case 'create_invite':
+      return text(await api.createInvite(auth, args.note));
     default:
       throw Object.assign(new Error(`unknown tool ${name}`), { code: -32602 });
   }
