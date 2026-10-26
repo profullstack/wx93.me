@@ -29,6 +29,13 @@ export const expectedOrigins = () => {
 
 export const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
 
+/**
+ * A same-origin path to go to after sign-in, or ''. Browsers read a backslash as a
+ * slash, so "/\\evil.example" is as off-site as "//evil.example".
+ */
+export const safeNext = (next) =>
+  typeof next === 'string' && /^\/(?![/\\])[^\\\s\u0000-\u001f]*$/.test(next) && next.length <= 512 ? next : '';
+
 /* -------------------------------------------------------------- magic link -- */
 
 /**
@@ -36,26 +43,29 @@ export const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
  * the token because the account row does not exist until the link is spent.
  * Bound as text and cast, so the driver never JSON-encodes the string a second time.
  */
-export async function createLoginLink(email, { next, profile = null } = {}) {
+export async function createLoginLink(email, { next, profile = null, invite = null } = {}) {
   const token = randomBytes(32).toString('base64url');
+  const inv = typeof invite === 'string' && /^[A-Za-z0-9-]{4,40}$/.test(invite) ? invite : null;
   await db()`
-    insert into login_tokens (token_hash, email, expires_at, profile)
+    insert into login_tokens (token_hash, email, expires_at, profile, invite)
     values (${sha(token)}, ${email.trim().toLowerCase()}, ${new Date(Date.now() + TOKEN_TTL_MINUTES * 60_000)},
-            ${profile ? JSON.stringify(profile) : null}::text::jsonb)`;
-  const safeNext = typeof next === 'string' && next.startsWith('/') && !next.startsWith('//') ? next : '';
-  return `${config.siteUrl}/auth/magic?t=${token}${safeNext ? `&next=${encodeURIComponent(safeNext)}` : ''}`;
+            ${profile ? JSON.stringify(profile) : null}::text::jsonb, ${inv})`;
+  const to = safeNext(next);
+  return `${config.siteUrl}/auth/magic?t=${token}${to ? `&next=${encodeURIComponent(to)}` : ''}`;
 }
 
 /** Spend a link. An address nobody has used before gets an account. */
 export async function consumeLoginLink(token, { userAgent } = {}) {
+  // The invite rides out once and is cleared; RETURNING sees the new row, so read it in a subquery.
   const [row] = await db()`
-    update login_tokens set used_at = now()
-    where token_hash = ${sha(token)} and used_at is null and expires_at > now()
-    returning email`;
+    update login_tokens t set used_at = now(), invite = null
+    from (select token_hash, invite from login_tokens where token_hash = ${sha(token)} for update) old
+    where t.token_hash = old.token_hash and t.used_at is null and t.expires_at > now()
+    returning t.email, old.invite`;
   if (!row) return null;
   const profile = await takeSignupProfile(sha(token));
-  const user = await findOrCreateUser(row.email);
-  return { user, sessionId: await startSession(user.id, userAgent), profile };
+  const { created, ...user } = await findOrCreateUser(row.email);
+  return { user, created, invite: row.invite ?? null, sessionId: await startSession(user.id, userAgent), profile };
 }
 
 /**
@@ -76,13 +86,14 @@ async function takeSignupProfile(tokenHash) {
   return typeof row.profile === 'string' ? JSON.parse(row.profile) : row.profile;
 }
 
+/** The account for an address, made if new. `created` says which (xmax is 0 only on a fresh insert). */
 export async function findOrCreateUser(email) {
   const e = email.trim().toLowerCase();
   const admin = config.adminEmails.includes(e);
   const [user] = await db()`
     insert into users (email, is_admin) values (${e}, ${admin})
     on conflict (lower(email)) do update set is_admin = users.is_admin or ${admin}, last_seen_at = now()
-    returning *`;
+    returning *, (xmax = 0) as created`;
   return user;
 }
 

@@ -63,6 +63,9 @@ function build() {
       { path: '/api/v1/reports', limit: 10, windowSeconds: 3600, credential: false },
       { path: '/report', limit: 10, windowSeconds: 3600, credential: false },
       { path: '/oauth/token', limit: 30, credential: false },
+      // Guessing credit codes: a handful an hour per address is plenty for a person with one.
+      { path: '/account/redeem', limit: 20, windowSeconds: 3600, credential: false },
+      { path: '/api/v1/credits/redeem', limit: 20, windowSeconds: 3600, credential: false },
       { path: '/oauth/authorize', limit: 30, credential: false },
     ],
   });

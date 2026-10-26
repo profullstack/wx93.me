@@ -266,6 +266,8 @@ export function Docs({ user }) {
 <tr><td><code>GET|POST|DELETE /api/v1/webhooks</code></td><td>Automation: <code>{url, events?}</code>; <code>POST /api/v1/webhooks/{id}/test</code></td></tr>
 <tr><td><code>GET|POST|DELETE /api/v1/domains</code></td><td>Automation: <code>{hostname}</code>, then TXT <code>_wx93.&lt;hostname&gt;</code> and <code>POST /api/v1/domains/{id}/verify</code></td></tr>
 <tr><td><code>POST /api/v1/billing/checkout</code></td><td><code>{plan: "pro"|"automation", term: "month"|"year"}</code> → <code>{checkout_url}</code></td></tr>
+<tr><td><code>POST /api/v1/credits/redeem</code></td><td><code>{code: "CR-…"}</code>: a credit code, for days of Pro</td></tr>
+<tr><td><code>GET|POST /api/v1/invites</code></td><td>your invites; <code>POST {note?}</code> → <code>{code, url}</code> (3 per account, one new account each)</td></tr>
 <tr><td><code>POST /api/v1/reports</code></td><td><code>{url, reason: phishing|malware|spam|illegal|other, details?}</code></td></tr>
 <tr><td><code>GET /api/v1/health</code></td><td>liveness, with a database round trip</td></tr>
 </table>
@@ -345,7 +347,7 @@ curl -s ${e(s)}/api/v1/links -H "x-crawl-pass: $(node -p "require('./pass.json')
  */
 const PROFILE_FIELDS = PROFILE_COLUMNS.filter((f) => f !== 'email');
 
-export function SignIn({ signup = false, error, next = '', guardFields = '', user, values = {}, errors = {} }) {
+export function SignIn({ signup = false, error, next = '', invite = '', guardFields = '', user, values = {}, errors = {} }) {
   return layout({
     title: signup ? 'Sign up' : 'Sign in',
     path: signup ? '/signup' : '/signin',
@@ -363,6 +365,7 @@ ${errors.email ? `<p class="pfs-profile__error" role="alert">${e(errors.email)}<
 ${signup ? `<input type="hidden" name="mode" value="signup">
 ${renderProfileFields({ fields: PROFILE_FIELDS, values, errors })}` : ''}
 <input type="hidden" name="next" value="${e(next)}">
+${invite ? `<input type="hidden" name="invite" value="${e(invite)}"><p class="hint">You were invited. The invite is applied when the new account is made.</p>` : ''}
 ${guardFields}
 <button class="btn primary">${signup ? 'Email me a sign-up link' : 'Email me a sign-in link'}</button>
 </form>
@@ -382,7 +385,7 @@ export function Sent({ email, user }) {
   });
 }
 
-export function Account({ user, plan, links, usage, keys, passkeys, hooks, domains, billing, created, flash, contact = {}, contactErrors = {} }) {
+export function Account({ user, plan, links, usage, keys, passkeys, hooks, domains, billing, created, flash, redeemError, contact = {}, contactErrors = {} }) {
   const rows = links
     .map(
       (l) => `<tr><td><a href="${e(l.short_url)}" class="mono">${e(l.short_url.replace(/^https?:\/\//, ''))}</a>${l.disabled ? ' <span class="pill bad">disabled</span>' : ''}</td>
@@ -406,6 +409,18 @@ ${flash ? `<p class="hint">${flash}</p>` : ''}
 <div class="card"><h3>Sign-in</h3><p class="muted">${passkeys} passkey${passkeys === 1 ? '' : 's'} on this account.</p>
 <button class="btn small js-only" hidden data-passkey-register type="button">Add a passkey</button><p class="muted" data-passkey-status></p>
 <form method="post" action="/auth/signout"><button class="btn small">Sign out</button></form></div>
+</div>
+
+<div class="grid3">
+<div class="card" id="redeem"><h3>Have a code?</h3>
+<form method="post" action="/account/redeem" class="stack">
+<label for="credit-code" class="muted">A credit code adds days of Pro to this account.</label>
+<input id="credit-code" name="code" placeholder="CR-XXXX-XXXX-XXXX-XXXX" required maxlength="64" autocomplete="off" spellcheck="false" class="mono">
+${redeemError ? `<p class="error">${e(redeemError)}</p>` : ''}
+<button class="btn small">Redeem</button>
+</form></div>
+<div class="card"><h3>Invites</h3><p class="muted">A few invite links to hand out. Each new account that joins through one gets a week of Pro, and so do you.</p>
+<a class="btn small" href="/invites">Your invites</a></div>
 </div>
 
 <h2>New link</h2>
@@ -568,7 +583,51 @@ ${guardFields}
   });
 }
 
-export function Admin({ user, reports, feed }) {
+export function Invites({ user, quota, invites, accepted, days, created, error }) {
+  const rows = invites
+    .map(
+      (i) => `<tr><td>${e(i.note || 'invite')}</td><td>${day(i.created_at)}</td><td>${
+        i.used ? `<span class="pill">joined ${day(i.used_at)}</span>` : i.revoked ? 'withdrawn' : i.expires_at && new Date(i.expires_at) < new Date() ? 'expired' : `open until ${day(i.expires_at)}`
+      }</td><td>${!i.used && !i.revoked ? `<form method="post" action="/invites/${e(i.id)}/revoke"><button class="btn small">Withdraw</button></form>` : ''}</td></tr>`,
+    )
+    .join('');
+  return layout({
+    title: 'Invites',
+    noindex: true,
+    user,
+    body: `<section class="narrow wide">
+<p class="eyebrow">Invites</p>
+<h1>Invite someone to wx93.</h1>
+<p class="lede">You have <b>${quota.left}</b> of ${quota.total} invites left. Each link works once, for one new account, for 30 days. They get ${days} days of Pro when they sign up, and you get ${days} days too.</p>
+${error ? `<p class="error">${e(error)}</p>` : ''}
+${created ? `<div class="card"><p>Your invite link. Only this page shows it, so copy it now.</p><div class="row"><input class="copyfield mono" readonly value="${e(created.url)}"><button class="btn copy" data-copy="${e(created.url)}" type="button">Copy</button></div><p class="muted">Code: <span class="mono">${e(created.code)}</span></p></div>` : ''}
+${quota.left > 0 ? `<form method="post" action="/invites" class="row"><input name="note" placeholder="who it is for (only you see this)" maxlength="80"><button class="btn primary">Make an invite link</button></form>` : ''}
+<h2>Sent</h2>
+${invites.length ? `<table class="tbl"><tr><th>For</th><th>Made</th><th>Status</th><th></th></tr>${rows}</table>` : '<p class="muted">None yet.</p>'}
+<p class="muted">${num(accepted)} ${accepted === 1 ? 'person has' : 'people have'} joined through your invites. Withdrawing an unused invite gives the slot back.</p>
+<p class="muted">Have a credit code instead? <a href="/account#redeem">Redeem it on your account</a>.</p>
+</section>`,
+  });
+}
+
+export function InviteLanding({ user, code, days }) {
+  const body = !code
+    ? `<h1>That invite link is not valid.</h1><p class="lede">Check that the whole link was copied.</p>`
+    : user
+      ? `<h1>You already have an account.</h1><p class="lede">Invites are for new accounts. Have a credit code? <a href="/account#redeem">Redeem it on your account</a>.</p>`
+      : `<h1>You were invited to wx93.</h1>
+<p class="lede">Short links that work with JavaScript off, with stats, QR codes and an API, CLI and MCP server for agents. Sign up through this invite and the new account starts with <b>${days} days of Pro</b>: direct redirects with no ad page, custom aliases and full stats.</p>
+<p><a class="btn primary" href="/signup?next=/account">Sign up with this invite</a> <a class="btn" href="/">See what it does</a></p>
+<p class="muted">The invite is kept on this browser and on the sign-up email, so opening the email on another device still counts it. One invite per new account.</p>`;
+  return layout({
+    title: 'You are invited',
+    noindex: true,
+    user,
+    body: `<section class="narrow"><p class="eyebrow">Invite</p>${body}</section>`,
+  });
+}
+
+export function Admin({ user, reports, feed, codes = [], minted = null }) {
   return layout({
     title: 'Admin',
     noindex: true,
@@ -582,7 +641,17 @@ export function Admin({ user, reports, feed }) {
       )
       .join('')}</table>
 <h2>Block a destination</h2>
-<form method="post" action="/admin/blocklist" class="row"><input name="domain" placeholder="bad.example" required><input name="reason" placeholder="reason"><button class="btn">Block</button></form></section>`,
+<form method="post" action="/admin/blocklist" class="row"><input name="domain" placeholder="bad.example" required><input name="reason" placeholder="reason"><button class="btn">Block</button></form>
+<h2 id="credits">Credit codes</h2>
+<p class="muted">A code grants days of Pro (unit <code>pro_days</code>), redeemed on the account page. Only the hash is stored: copy a new code now.</p>
+${minted?.error ? `<p class="error">${e(minted.error)}</p>` : minted?.code ? `<div class="card"><p>New code, ${num(minted.grant.amount)} days of Pro, ${num(minted.maxRedemptions)} use${minted.maxRedemptions === 1 ? '' : 's'}:</p><div class="row"><input class="copyfield mono" readonly value="${e(minted.code)}"><button class="btn copy" data-copy="${e(minted.code)}" type="button">Copy</button></div></div>` : ''}
+<form method="post" action="/admin/credits" class="row"><input name="days" type="number" min="1" max="3650" value="30" required aria-label="days of Pro"><input name="max_redemptions" type="number" min="1" max="10000" value="1" aria-label="uses"><input name="expires_days" type="number" min="1" placeholder="expires in days (blank: never)"><input name="label" placeholder="label, e.g. who it is for" maxlength="120"><button class="btn">Mint a code</button></form>
+<table class="tbl">${codes
+      .map(
+        (k) => `<tr><td>${e(k.label || '-')}</td><td>${num(k.grant.amount)} ${e(k.grant.unit)}</td><td>${num(k.redemptions)}/${num(k.maxRedemptions)}</td><td>${k.revokedAt ? 'revoked' : k.expiresAt && k.expiresAt < Date.now() ? 'expired' : 'live'}</td><td>${day(k.createdAt)}</td>
+<td>${k.revokedAt ? '' : `<form method="post" action="/admin/credits/${e(k.id)}/revoke"><button class="btn small">Revoke</button></form>`}</td></tr>`,
+      )
+      .join('')}</table></section>`,
   });
 }
 
