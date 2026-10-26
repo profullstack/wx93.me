@@ -29,6 +29,11 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 details.more summary{cursor:pointer;color:var(--muted);font-size:14px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0}.row label{display:inline-flex;gap:6px;align-items:center;color:var(--muted)}
 .stack{display:grid;gap:10px}
+/* The shared profile fields (@profullstack/profile renderProfileFields), made to read like the email box. */
+.pfs-profile{border:0;padding:0;margin:0;min-width:0;display:grid;gap:10px}
+.pfs-profile__row{display:grid;gap:6px}
+.pfs-profile__optional{color:var(--muted);font-size:14px}
+.pfs-profile__error{color:var(--bad);font-size:14px;margin:0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}
 .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:24px 0}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:8px 24px}

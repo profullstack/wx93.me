@@ -464,3 +464,84 @@ d('QR codes', () => {
     expect(result.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png' });
   });
 });
+
+d('signup profile (@profullstack/profile)', () => {
+  const formPost = (fields) =>
+    req('/auth/link', {
+      method: 'POST',
+      headers: { 'user-agent': CHROME, 'content-type': 'application/x-www-form-urlencoded', accept: 'text/html' },
+      body: new URLSearchParams(fields).toString(),
+    });
+  const hidden = (html) => Object.fromEntries([...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g)].map((m) => [m[1], m[2].replace(/&amp;/g, '&')]));
+
+  test('signup asks for the fields, sign-in does not', async () => {
+    const signup = await (await req('/signup')).text();
+    for (const name of ['first_name', 'last_name', 'company_domain', 'job_title', 'linkedin_url'])
+      expect(signup.match(new RegExp(`name="${name}"`, 'g'))?.length).toBe(1);
+    expect(signup.match(/name="email"/g)?.length).toBe(1);
+    expect(signup).toContain('name="mode" value="signup"');
+    expect(signup).toContain('src="/assets/profile.js"');
+    const signin = await (await req('/signin')).text();
+    expect(signin).not.toContain('name="first_name"');
+    expect(signin).not.toContain('name="mode"');
+    expect((await req('/assets/profile.js')).headers.get('content-type')).toContain('javascript');
+  });
+
+  test('a signup without a last name is refused before any link exists', async () => {
+    const res = await formPost({ mode: 'signup', email: 'nolast@acme.example', first_name: 'Ada' });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('value="Ada"');
+    expect(html).toContain('pfs-profile__error');
+    const [{ n }] = await db()`select count(*)::int as n from login_tokens where email = 'nolast@acme.example'`;
+    expect(n).toBe(0);
+  });
+
+  test('signup fields ride the token and are saved when the link is spent', async () => {
+    const email = 'ada@acme.example';
+    const guard = hidden(await (await req('/signup', { headers: { 'user-agent': CHROME } })).text());
+    await Bun.sleep(1300); // the form guard refuses a form filled faster than a person can
+    const res = await formPost({
+      ...guard,
+      mode: 'signup',
+      email: 'Ada@Acme.example',
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      company_domain: 'https://www.acme.example/about',
+      job_title: 'VP Engineering',
+      linkedin_url: 'in/ada-lovelace',
+    });
+    expect(res.status).toBe(200);
+    const [token] = await db()`select profile from login_tokens where email = ${email}`;
+    expect(token?.profile).toMatchObject({ first_name: 'Ada', last_name: 'Lovelace', job_title: 'VP Engineering' });
+
+    // The route's link went to the mailer; mint one the same way to spend it here.
+    const url = new URL(await auth.createLoginLink(email, { profile: token.profile }));
+    const spent = await req(url.pathname + url.search);
+    expect(spent.status).toBe(302);
+    const cookie = spent.headers.get('set-cookie').split(';')[0];
+    const me = await req('/api/v1/me/profile', { headers: { cookie } });
+    expect(me.status).toBe(200);
+    expect((await me.json()).profile).toMatchObject({
+      email,
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      company_domain: 'acme.example',
+      job_title: 'VP Engineering',
+      linkedin_url: 'https://www.linkedin.com/in/ada-lovelace',
+    });
+    const [{ n }] = await db()`select count(*)::int as n from login_tokens where email = ${email} and used_at is not null and profile is not null`;
+    expect(n).toBe(0);
+    expect(await (await req('/account', { headers: { cookie } })).text()).toContain('value="Lovelace"');
+  });
+
+  test('plain sign-in carries no profile, and the profile API is 401 signed out', async () => {
+    const guard = hidden(await (await req('/signin', { headers: { 'user-agent': CHROME } })).text());
+    await Bun.sleep(1300);
+    expect((await formPost({ ...guard, email: 'plain@acme.example' })).status).toBe(200);
+    const [row] = await db()`select profile from login_tokens where email = 'plain@acme.example'`;
+    expect(row.profile).toBeNull();
+    const res = await req('/api/v1/me/profile');
+    expect(res.status).toBe(401);
+  });
+});

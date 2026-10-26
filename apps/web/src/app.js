@@ -6,6 +6,13 @@ import { fileURLToPath } from 'node:url';
 import { db, healthcheck } from '@wx93/db';
 import * as pay from '@wx93/payments';
 import { createFormGuard } from '@profullstack/form-guard';
+import {
+  createProfileStore,
+  mountProfileRoutes,
+  PROFILE_ENHANCE_SCRIPT,
+  saveSignupProfile,
+  validateProfile,
+} from '@profullstack/profile';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { checkDestination, checkShape, DestinationError, feedStatus } from './abuse.js';
@@ -390,11 +397,24 @@ app.post('/shorten', async (c) => {
 app.post('/auth/link', async (c) => {
   const fields = await c.req.parseBody();
   const email = String(fields.email ?? '').trim();
+  // The signup form carries the shared profile fields; plain sign-in does not and is
+  // never asked for them. Checked before any link exists, and a refusal goes back to
+  // the form with what was typed: the same answer for a known or unknown address.
+  let profile = null;
+  if (fields.mode === 'signup') {
+    const check = validateProfile(fields);
+    if (!check.ok)
+      return c.html(
+        P.SignIn({ signup: true, next: String(fields.next ?? ''), values: fields, errors: check.errors, guardFields: await guardFields('signin') }),
+        400,
+      );
+    profile = check.profile;
+  }
   const verdict = await guardCheck('signin', c, fields);
   // Answer the same whatever happens next: a different answer for a known address enumerates accounts.
   if (verdict.action !== 'drop' && verdict.action !== 'limited' && auth.EMAIL.test(email)) {
     try {
-      await sendLoginLink({ email, url: await auth.createLoginLink(email, { next: String(fields.next ?? '') }) });
+      await sendLoginLink({ email, url: await auth.createLoginLink(email, { next: String(fields.next ?? ''), profile }) });
     } catch (err) {
       console.error(`[auth] could not send link: ${err?.message ?? err}`);
     }
@@ -406,6 +426,13 @@ app.get('/auth/magic', async (c) => {
   const token = c.req.query('t');
   const s = token ? await auth.consumeLoginLink(token, { userAgent: c.req.header('user-agent') }) : null;
   if (!s) return c.redirect('/signin?error=expired', 302);
+  // The fields typed on the signup form, saved now that the account exists and the
+  // link has proved the mailbox. A failure must not cost anybody their sign-in: the
+  // account page asks again.
+  if (s.profile)
+    await saveSignupProfile(profiles, s.user.id, s.profile, { email: s.user.email }).catch((err) =>
+      console.error(`[auth] signup profile save failed: ${err?.message ?? err}`),
+    );
   c.header('set-cookie', auth.sessionCookie(s.sessionId));
   const next = c.req.query('next');
   return c.redirect(next && next.startsWith('/') && !next.startsWith('//') ? next : '/account', 302);
@@ -440,6 +467,32 @@ app.post('/auth/passkey/login/verify', async (c) => {
 
 mountOAuth(app);
 
+/* ---------------------------------------------------------------- profile -- */
+
+/*
+ * The shared Profullstack profile (@profullstack/profile): email, names, company
+ * domain, job title and LinkedIn, in user_profiles. The store is made on first use
+ * because the database is (unit tests import this file without one).
+ * GET/PUT/PATCH /api/v1/me/profile are the package's own handlers, for any caller
+ * (session, API key or OAuth); the account form below is the same validation
+ * without script.
+ */
+let profileStore = null;
+const profiles = new Proxy({}, { get: (_, k) => (profileStore ??= createProfileStore(db()))[k] });
+mountProfileRoutes(app, {
+  store: profiles,
+  getUser: async (_req, c) => {
+    const { user } = await caller(c);
+    return user ? { id: user.id, email: user.email } : null;
+  },
+});
+
+// The signup form's company-from-work-email helper. Served as a file because the
+// policy allows no inline script.
+app.get('/assets/profile.js', (c) =>
+  c.body(PROFILE_ENHANCE_SCRIPT, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=3600' }),
+);
+
 /* ---------------------------------------------------------------- account -- */
 
 async function accountPage(c, user, extra = {}) {
@@ -454,8 +507,9 @@ async function accountPage(c, user, extra = {}) {
     sql`select id, hostname, verify_token, verified_at from domains where user_id = ${user.id} order by created_at`,
     billingState(user),
   ]);
+  const contact = (await profiles.get(user.id)) ?? { email: user.email };
   return c.html(
-    P.Account({ user, plan, links: links.map(publicLink), usage: { links: usage }, keys, passkeys: pk.n, hooks, domains, billing, ...extra }),
+    P.Account({ user, plan, links: links.map(publicLink), usage: { links: usage }, keys, passkeys: pk.n, hooks, domains, billing, contact, ...extra }),
   );
 }
 
@@ -469,6 +523,16 @@ app.get('/account', async (c) => {
   if (!user) return c.redirect('/signin?next=/account', 302);
   const flash = c.req.query('paid') ? 'Thanks. Your plan switches on as soon as the payment confirms, usually within a minute or two.' : null;
   return accountPage(c, user, { flash });
+});
+
+app.post('/account/profile', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin', 303);
+  const form = await c.req.parseBody();
+  const check = validateProfile({ ...form, email: user.email });
+  if (!check.ok) return accountPage(c, user, { contact: form, contactErrors: check.errors });
+  await profiles.save(user.id, check.profile);
+  return accountPage(c, user, { flash: 'Contact details saved.' });
 });
 
 app.post('/account/keys', async (c) => {
