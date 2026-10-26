@@ -8,6 +8,6 @@
     "./migrate": "./src/migrate.js"
   },
   "dependencies": {
-    "postgres": "^3.4.7"
+    "postgres": "^3.4.9"
   }
 }
