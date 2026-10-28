@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createTokenStore, getAccessToken } from '@profullstack/auth-system/cli';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.4.1';
 export const DEFAULT_SERVER = 'https://wx93.me';
 export const CONFIG_FILE = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'wx93', 'config.json');
 
