@@ -20,6 +20,7 @@
         "@profullstack/redeem-credits": "0.2.0",
         "@profullstack/throttle": "^0.4.0",
         "@profullstack/watchdog": "^0.3.0",
+        "@profullstack/webhooks": "0.2.0",
         "@profullstack/wx93": "workspace:*",
         "@profullstack/x402-gateway": "^0.13.1",
         "@resvg/resvg-wasm": "2.6.2",
@@ -35,7 +36,7 @@
     },
     "packages/cli": {
       "name": "@profullstack/wx93",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "wx93": "./bin/wx93.mjs",
       },
@@ -54,12 +55,12 @@
     },
     "packages/mcp": {
       "name": "@profullstack/wx93-mcp",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "wx93-mcp": "./bin/wx93-mcp.mjs",
       },
       "dependencies": {
-        "@profullstack/wx93": "^0.3.0",
+        "@profullstack/wx93": "^0.4.0",
       },
     },
     "packages/payments": {
@@ -123,6 +124,8 @@
     "@profullstack/throttle": ["@profullstack/throttle@0.4.0", "", { "dependencies": { "@profullstack/x402-gateway": "^0.6.0 || ^0.7.0 || ^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^0.14.0 || ^0.15.0" } }, "sha512-Lj+XHt51OxyaJ2FqosZDyr9Z5RFB8z+ARixpoUfrDu3YlvFlct5GbbZM/C0qLZkUgzeuFSDvtYt9f0NNfBkFqA=="],
 
     "@profullstack/watchdog": ["@profullstack/watchdog@0.3.0", "", { "bin": { "watchdog-autoheal": "bin/watchdog-autoheal.js" } }, "sha512-w+Wc7+2smPzV2LdxwIKWBVX0jMyE8+uokPoC2xbBL2yYSiaz356wrTS81l+rbRLdFFHXusRv9tNHUTEtRDfLCQ=="],
+
+    "@profullstack/webhooks": ["@profullstack/webhooks@0.2.0", "", {}, "sha512-lfUoJwN5GmxHzCOphI7fNQAsZ9uiC2C6BZxoPA7MSxM2ryr7MKwOi2YYszwvN6aPaPTRHLhHdqoHQJbkaP9mUg=="],
 
     "@profullstack/wx93": ["@profullstack/wx93@workspace:packages/cli"],
 

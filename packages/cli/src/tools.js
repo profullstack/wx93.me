@@ -38,6 +38,9 @@ const qrStyle = {
 const QR_TYPE_LIST = ['url', 'vcard', 'event', 'links', 'text', 'wifi', 'email', 'phone', 'sms', 'whatsapp', 'geo', 'crypto'];
 const qrId = { type: 'string', description: 'The QR code id (a UUID from create_qr_code or list_qr_codes).' };
 
+const hookId = { type: 'string', description: 'The webhook endpoint id (from list_webhooks or create_webhook).' };
+const idOnly = { type: 'object', properties: { id: hookId }, required: ['id'], additionalProperties: false };
+
 const refOnly = {
   type: 'object',
   properties: { ref: { type: 'string', description: 'The link id, its code, or the whole short URL.' } },
@@ -185,6 +188,40 @@ export const TOOLS = [
     description: 'Make one invite link (single use, 30 days). A new account that signs up through it gets a week of Pro, and so does the inviter. The link is shown once.',
     inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Who it is for; only the inviter sees it.' } }, additionalProperties: false },
   },
+  { name: 'list_webhooks', description: 'Your webhook endpoints and the event types wx93 sends (link.created, link.clicked).', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  {
+    name: 'create_webhook',
+    description:
+      'Have wx93 POST link events to an https URL (Automation plan): link.created when a link is made, link.clicked on every human click. Deliveries are signed CloudEvents (Standard Webhooks headers, plus x-wx93-signature). Returns the signing secret once. events: link.created, link.clicked, link.* or *; omit for all.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'https URL that receives the POSTs.' },
+        events: { type: 'array', items: { type: 'string' } },
+        description: { type: 'string' },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_webhook',
+    description: 'Change a webhook endpoint: url, events, description, or enabled (true turns a switched-off endpoint back on).',
+    inputSchema: {
+      type: 'object',
+      properties: { id: hookId, url: { type: 'string' }, events: { type: 'array', items: { type: 'string' } }, description: { type: 'string' }, enabled: { type: 'boolean' } },
+      required: ['id'],
+      additionalProperties: false,
+    },
+  },
+  { name: 'test_webhook', description: 'Send a webhook.test event to an endpoint now and say how it went.', inputSchema: idOnly },
+  { name: 'rotate_webhook_secret', description: 'Replace an endpoint\'s signing secret. Returns the new one; the old one stops working at once.', inputSchema: idOnly },
+  { name: 'delete_webhook', description: 'Remove a webhook endpoint.', inputSchema: idOnly },
+  {
+    name: 'webhook_deliveries',
+    description: 'Recent webhook deliveries with their payloads and results, for one endpoint or all of them.',
+    inputSchema: { type: 'object', properties: { id: hookId, limit: { type: 'integer', minimum: 1, maximum: 200 } }, additionalProperties: false },
+  },
 ];
 
 /** A QR code as JSON plus its picture, so a client that shows images shows it. */
@@ -247,6 +284,22 @@ export async function callTool(auth, name, args = {}) {
       return text(await api.invites(auth));
     case 'create_invite':
       return text(await api.createInvite(auth, args.note));
+    case 'list_webhooks':
+      return text(await api.webhooks(auth));
+    case 'create_webhook':
+      return text(await api.addWebhook(auth, args.url, args.events, args.description));
+    case 'update_webhook': {
+      const { id, ...patch } = args;
+      return text(await api.updateWebhook(auth, id, patch));
+    }
+    case 'test_webhook':
+      return text(await api.testWebhook(auth, args.id));
+    case 'rotate_webhook_secret':
+      return text(await api.rotateWebhook(auth, args.id));
+    case 'delete_webhook':
+      return text(await api.removeWebhook(auth, args.id));
+    case 'webhook_deliveries':
+      return text(await api.webhookLog(auth, args.id, { limit: args.limit }));
     default:
       throw Object.assign(new Error(`unknown tool ${name}`), { code: -32602 });
   }

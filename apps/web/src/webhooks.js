@@ -1,99 +1,118 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac } from 'node:crypto';
+import { postgresStore, Webhooks } from '@profullstack/webhooks';
 import { db } from '@wx93/db';
+import { config } from './config.js';
 
 /**
- * Webhooks (Automation): signed JSON POSTs for link.created and link.clicked.
+ * Webhooks (Automation): link.created and link.clicked, sent through the house
+ * hub, @profullstack/webhooks. Each delivery is a CloudEvents 1.0 JSON body with
+ * Standard Webhooks headers (webhook-id, webhook-timestamp, webhook-signature),
+ * queued in Postgres (webhook_endpoints / webhook_deliveries) so a restart loses
+ * nothing, and listed in a delivery log.
  *
- * Signature: `x-wx93-signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`,
- * the same shape CoinPay and Stripe use, so existing verifiers drop in. Delivery
- * is in-process and best effort: three attempts with backoff, and a hook that
- * fails 50 times in a row is switched off rather than retried forever.
+ * Every delivery also carries the header wx93 has always sent, so receivers
+ * built before the hub keep verifying with no change:
+ *
+ *   x-wx93-signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
+ *
+ * The HMAC key there is the secret string's own UTF-8 bytes, `whsec_` prefix
+ * and all. The package's tV1Header() decodes a `whsec_` secret as base64 first
+ * (the Standard Webhooks rule), which would NOT match what wx93 receivers
+ * check, so the header is built here with the old key rule.
  */
 
 export const EVENTS = ['link.created', 'link.clicked'];
-const MAX_FAILURES = 50;
 
+/** The x-wx93-signature value: HMAC keyed with the secret as UTF-8, over `${t}.${body}`. */
 export function sign(secret, body, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`;
 }
 
-export function newSecret() {
-  return `whsec_${randomBytes(24).toString('base64url')}`;
+/** The hub's extraHeaders: the legacy wx93 header next to the Standard Webhooks ones. */
+export const wx93Signature = ({ body, secret }) => ({ 'x-wx93-signature': sign(secret, body) });
+
+/**
+ * Same delivery rhythm as before the hub: three attempts (now, +5 s, +60 s), and an
+ * endpoint that fails 50 in a row is switched off. link.clicked fires on every
+ * human click, so a dead receiver must not pile up days of retries.
+ */
+export const BACKOFF_MS = [5_000, 60_000];
+export const DISABLE_AFTER = 50;
+/** Delivery log kept this long; clicks make a lot of rows. */
+export const KEEP_DAYS = 7;
+
+/** postgres.js (tagged templates) as the pg-style `query(text, params)` the store wants. */
+export const pgQuery = (sql) => ({ query: async (text, params = []) => ({ rows: await sql.unsafe(text, params) }) });
+
+/**
+ * Endpoint lists cached per owner for a minute, as the old sender did: every
+ * link.clicked looks them up, and they change rarely. Any endpoint write
+ * (create, edit, rotate, a failure count) clears the cache.
+ */
+export function cachedEndpoints(store, ms = 60_000) {
+  const hits = new Map();
+  const clear = () => hits.clear();
+  return Object.assign(Object.create(null), store, {
+    async listEndpoints(owner) {
+      const hit = hits.get(owner);
+      if (hit && Date.now() - hit.at < ms) return hit.rows.map((e) => ({ ...e, events: [...e.events] }));
+      const rows = await store.listEndpoints(owner);
+      hits.set(owner, { rows, at: Date.now() });
+      return rows.map((e) => ({ ...e, events: [...e.events] }));
+    },
+    async insertEndpoint(e) {
+      clear();
+      await store.insertEndpoint(e);
+      clear();
+    },
+    async updateEndpoint(id, patch) {
+      clear();
+      await store.updateEndpoint(id, patch);
+      clear();
+    },
+    async deleteEndpoint(id) {
+      clear();
+      await store.deleteEndpoint(id);
+      clear();
+    },
+  });
 }
 
-const hooksCache = new Map();
-const HOOK_CACHE_MS = 60_000;
-export const forgetHooks = (userId) => hooksCache.delete(userId);
-
-async function hooksFor(userId) {
-  const hit = hooksCache.get(userId);
-  if (hit && Date.now() - hit.at < HOOK_CACHE_MS) return hit.rows;
-  const rows = await db()`select id, url, secret, events from webhooks where user_id = ${userId} and disabled_at is null`;
-  hooksCache.set(userId, { rows, at: Date.now() });
-  return rows;
+/** The hub with wx93's settings. Tests pass a memoryStore, a fake fetch and a DNS stub. */
+export function createHub({ store, ...options }) {
+  return new Webhooks({
+    store,
+    source: config.siteUrl,
+    eventTypes: EVENTS,
+    maxEndpoints: 10,
+    backoffMs: BACKOFF_MS,
+    disableAfter: DISABLE_AFTER,
+    extraHeaders: wx93Signature,
+    log: (m) => console.warn(`[webhooks] ${m}`),
+    ...options,
+  });
 }
 
-const queue = [];
-let running = 0;
-const CONCURRENCY = 4;
+let hub = null;
 
-/** Fire an event at every hook the user has for it. Never throws, never waits. */
-export function emit(userId, type, data) {
-  void (async () => {
-    try {
-      for (const hook of await hooksFor(userId)) {
-        if (!hook.events.includes(type)) continue;
-        queue.push({ hook, body: JSON.stringify({ id: `evt_${randomBytes(9).toString('base64url')}`, type, created_at: new Date().toISOString(), data }), attempt: 0 });
-      }
-      pump();
-    } catch (err) {
-      console.warn(`[webhooks] ${type} for ${userId}: ${err?.message ?? err}`);
-    }
-  })();
+/** The app's hub on the shared Postgres pool, made on first use (unit tests import this without a DB). */
+export function hooks() {
+  hub ??= createHub({ store: cachedEndpoints(postgresStore(pgQuery(db()))) });
+  return hub;
 }
 
-function pump() {
-  while (running < CONCURRENCY && queue.length) {
-    const job = queue.shift();
-    running++;
-    deliver(job).finally(() => {
-      running--;
-      pump();
-    });
-  }
+/** Start draining due deliveries. Once, at server boot. */
+export function startWebhooks() {
+  return hooks().start({ keepDays: KEEP_DAYS });
 }
 
-/** One delivery attempt. Exported so the "send a test" endpoint can await it. */
-export async function deliver(job, { fetchImpl = fetch } = {}) {
-  const { hook, body } = job;
-  let status = 0;
-  let error = null;
+/** Fire an event at every endpoint the user has for it. Never throws, never waits. */
+export function emit(userId, type, data, { subject } = {}) {
+  if (!userId) return;
+  const warn = (err) => console.warn(`[webhooks] ${type} for ${userId}: ${err?.message ?? err}`);
   try {
-    const res = await fetchImpl(hook.url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'user-agent': 'wx93-webhooks/1', 'x-wx93-signature': sign(hook.secret, body) },
-      body,
-      redirect: 'manual',
-      signal: AbortSignal.timeout(10_000),
-    });
-    status = res.status;
-    if (status < 200 || status >= 300) error = `HTTP ${status}`;
+    hooks().emit(String(userId), type, data, subject ? { subject } : {}).catch(warn);
   } catch (err) {
-    error = String(err?.message ?? err).slice(0, 200);
+    warn(err);
   }
-  try {
-    await db()`
-      update webhooks set last_status = ${status || null}, last_error = ${error}, last_delivery_at = now(),
-        failures = case when ${error === null} then 0 else failures + 1 end,
-        disabled_at = case when ${error !== null} and failures + 1 >= ${MAX_FAILURES} then now() else disabled_at end
-      where id = ${hook.id}`;
-  } catch {}
-  if (error && job.attempt < 2) {
-    const wait = [5_000, 60_000][job.attempt];
-    setTimeout(() => {
-      queue.push({ ...job, attempt: job.attempt + 1 });
-      pump();
-    }, wait).unref?.();
-  }
-  return { status, error };
 }

@@ -684,3 +684,78 @@ d('credit codes and invites', () => {
     }
   });
 });
+
+d('customer webhooks (@profullstack/webhooks)', () => {
+  let owner, h;
+  test('the API needs a key, and creating one needs Automation', async () => {
+    expect((await req('/api/v1/webhooks')).status).toBe(401);
+    expect((await req('/api/v1/webhooks/whatever/test', { method: 'POST' })).status).toBe(401);
+    owner = await signIn('hooks@example.test');
+    h = { cookie: owner.cookie };
+    const free = await req('/api/v1/webhooks', { method: 'POST', headers: h, json: { url: 'https://example.com/hooks/wx93' } });
+    expect(free.status).toBe(402);
+    await db()`insert into plan_periods (user_id, plan, term, starts_at, ends_at) values (${owner.user.id}, 'automation', 'month', now() - interval '1 day', now() + interval '30 days')`;
+  });
+
+  test('an endpoint from the old webhooks table keeps its id and secret, and clicks queue a delivery for it', async () => {
+    // Migration 0005 ran in beforeAll on an empty table; run its copy step again on a row in the old shape.
+    const migration = await Bun.file(new URL('../packages/db/migrations/0005_webhooks_hub.sql', import.meta.url)).text();
+    const copy = migration.slice(migration.indexOf('insert into webhook_endpoints'), migration.indexOf('on conflict (id) do nothing;') + 'on conflict (id) do nothing;'.length);
+    const secret = `whsec_${randomBytes(24).toString('base64url')}`;
+    const [old] = await db()`
+      insert into webhooks_legacy (user_id, url, secret, events, failures)
+      values (${owner.user.id}, 'https://example.com/hooks/old', ${secret}, '{link.created,link.clicked}', 2) returning id`;
+    await db().unsafe(copy.replace('from webhooks w', 'from webhooks_legacy w'));
+
+    const list = await (await req('/api/v1/webhooks', { headers: h })).json();
+    expect(list.event_types).toEqual(['link.created', 'link.clicked']);
+    const ep = list.endpoints.find((e) => e.id === old.id);
+    expect(ep).toMatchObject({ url: 'https://example.com/hooks/old', events: ['link.created', 'link.clicked'], enabled: true, failures: 2 });
+    expect(list.webhooks).toEqual(list.endpoints); // the pre-hub response key
+    expect((await (await req(`/api/v1/webhooks/${old.id}/secret`, { headers: h })).json()).secret).toBe(secret);
+
+    // A link of theirs, clicked by a person: one link.created and one link.clicked queued (the drainer is not running in tests).
+    const link = await (await req('/api/v1/links', { method: 'POST', headers: h, json: { url: 'https://example.org/hooked' } })).json();
+    links.clearCache();
+    await req(`/${link.code}`, { headers: { 'user-agent': CHROME } });
+    await Bun.sleep(100);
+    const log = await (await req(`/api/v1/webhooks/${old.id}/deliveries`, { headers: h })).json();
+    expect(log.deliveries.map((x) => x.event_type).sort()).toEqual(['link.clicked', 'link.created']);
+    const clicked = log.deliveries.find((x) => x.event_type === 'link.clicked');
+    expect(clicked.payload).toMatchObject({ type: 'link.clicked', source: SITE, subject: `link:${link.code}`, data: { link: { code: link.code } } });
+  });
+
+  test('create, change, rotate and delete through the API', async () => {
+    const res = await req('/api/v1/webhooks', { method: 'POST', headers: h, json: { url: 'https://example.com/hooks/new', events: ['link.created'] } });
+    expect(res.status).toBe(201);
+    const made = await res.json();
+    expect(made.secret).toStartWith('whsec_');
+    expect(made.endpoint.events).toEqual(['link.created']);
+    expect(made.id).toBe(made.endpoint.id); // the pre-hub response shape too
+    const bad = await req('/api/v1/webhooks', { method: 'POST', headers: h, json: { url: 'https://example.com/x', events: ['room.joined'] } });
+    expect(bad.status).toBe(400);
+    const http = await req('/api/v1/webhooks', { method: 'POST', headers: h, json: { url: 'http://example.com/x' } });
+    expect(http.status).toBe(400);
+    const off = await (await req(`/api/v1/webhooks/${made.id}`, { method: 'PATCH', headers: h, json: { enabled: false } })).json();
+    expect(off.enabled).toBe(false);
+    const rotated = await (await req(`/api/v1/webhooks/${made.id}/rotate`, { method: 'POST', headers: h })).json();
+    expect(rotated.secret).not.toBe(made.secret);
+    // Someone else's id is not found.
+    const other = await signIn('not-the-owner@example.test');
+    expect((await req(`/api/v1/webhooks/${made.id}`, { headers: { cookie: other.cookie } })).status).toBe(404);
+    expect((await req(`/api/v1/webhooks/${made.id}`, { method: 'DELETE', headers: h })).status).toBe(200);
+    expect((await req(`/api/v1/webhooks/${made.id}`, { headers: h })).status).toBe(404);
+  });
+
+  test('the account page lists them with test, new secret, off and delete', async () => {
+    const page = await (await req('/account', { headers: { ...h, 'user-agent': CHROME } })).text();
+    expect(page).toContain('https://example.com/hooks/old');
+    for (const action of ['test', 'rotate', 'disable', 'delete']) expect(page).toMatch(new RegExp(`/account/webhooks/[^"]+/${action}"`));
+    expect(page).toContain('name="events" value="link.clicked"');
+    const form = new URLSearchParams([['url', 'https://example.com/hooks/form'], ['events', 'link.clicked']]);
+    const added = await (await req('/account/webhooks', { method: 'POST', headers: { ...h, 'content-type': 'application/x-www-form-urlencoded' }, body: form.toString() })).text();
+    expect(added).toMatch(/signing secret \(shown once\): <code>whsec_/);
+    const mine = await (await req('/api/v1/webhooks', { headers: h })).json();
+    expect(mine.endpoints.find((e) => e.url === 'https://example.com/hooks/form').events).toEqual(['link.clicked']);
+  });
+});

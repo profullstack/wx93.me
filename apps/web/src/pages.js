@@ -263,7 +263,7 @@ export function Docs({ user }) {
 <tr><td><code>GET /api/v1/expand?url=</code></td><td>where a wx93 link goes, without visiting it</td></tr>
 <tr><td><code>GET /api/v1/me</code></td><td>account, plan, usage and limits</td></tr>
 <tr><td><code>GET|POST|DELETE /api/v1/keys</code></td><td>API keys</td></tr>
-<tr><td><code>GET|POST|DELETE /api/v1/webhooks</code></td><td>Automation: <code>{url, events?}</code>; <code>POST /api/v1/webhooks/{id}/test</code></td></tr>
+<tr><td><code>GET|POST /api/v1/webhooks</code></td><td>Automation: <code>{url, events?, description?}</code> returns the secret once. Events: <code>link.created</code>, <code>link.clicked</code> (or <code>link.*</code>). Per webhook: <code>GET|PATCH|DELETE /{id}</code>, <code>GET /{id}/secret</code>, <code>POST /{id}/rotate</code>, <code>POST /{id}/test</code>, <code>GET /{id}/deliveries</code>; <code>GET /deliveries</code>, <code>POST /deliveries/{id}/retry</code></td></tr>
 <tr><td><code>GET|POST|DELETE /api/v1/domains</code></td><td>Automation: <code>{hostname}</code>, then TXT <code>_wx93.&lt;hostname&gt;</code> and <code>POST /api/v1/domains/{id}/verify</code></td></tr>
 <tr><td><code>POST /api/v1/billing/checkout</code></td><td><code>{plan: "pro"|"automation", term: "month"|"year"}</code> → <code>{checkout_url}</code></td></tr>
 <tr><td><code>POST /api/v1/credits/redeem</code></td><td><code>{code: "CR-…"}</code>: a credit code, for days of Pro</td></tr>
@@ -455,9 +455,17 @@ ${
 <h2 id="webhooks">Webhooks</h2>
 ${
   plan.webhooks
-    ? `<table class="tbl">${hooks.map((h) => `<tr><td class="mono">${e(h.url)}</td><td>${e(h.events.join(', '))}</td><td>${h.disabled_at ? 'disabled' : h.last_status ? `last ${h.last_status}` : 'no deliveries yet'}</td><td><form method="post" action="/account/webhooks/${e(h.id)}/delete"><button class="btn small">Delete</button></form></td></tr>`).join('')}</table>
-<form method="post" action="/account/webhooks" class="row"><input name="url" type="url" placeholder="https://your-app.example/hooks/wx93" required><button class="btn">Add webhook</button></form>
-<p class="muted">Signed with <code>x-wx93-signature: t=…,v1=…</code> (HMAC-SHA256 of <code>t.body</code>). The secret is shown once when you add it via the API.</p>`
+    ? `${hooks.length ? `<table class="tbl">${hooks.map((h) => `<tr><td class="mono">${e(h.url)}</td><td>${e(h.events.join(', '))}</td><td>${h.enabled ? (h.failures ? `${h.failures} failed in a row` : 'on') : `off${h.disabled_reason ? `: ${e(h.disabled_reason)}` : ''}`}</td><td><div class="row">${[
+          ['test', 'Test'],
+          ['rotate', 'New secret'],
+          h.enabled ? ['disable', 'Turn off'] : ['enable', 'Turn on'],
+          ['delete', 'Delete'],
+        ].map(([action, label]) => `<form method="post" action="/account/webhooks/${e(h.id)}/${action}"><button class="btn small">${label}</button></form>`).join('')}</div></td></tr>`).join('')}</table>` : '<p class="muted">None yet.</p>'}
+<form method="post" action="/account/webhooks" class="stack">
+<div class="row"><input name="url" type="url" placeholder="https://your-app.example/hooks/wx93" required><button class="btn">Add webhook</button></div>
+<div class="row">${['link.created', 'link.clicked'].map((ev) => `<label><input type="checkbox" name="events" value="${ev}" checked> ${ev}</label>`).join(' ')}</div>
+</form>
+<p class="muted">Each delivery is a CloudEvents JSON body signed per <a href="https://www.standardwebhooks.com/">Standard Webhooks</a> (<code>webhook-id</code>, <code>webhook-timestamp</code>, <code>webhook-signature</code>), and also with <code>x-wx93-signature: t=…,v1=…</code> (hex HMAC-SHA256 of <code>t.body</code>, keyed with the secret as written). The secret is shown once, when you add a webhook or ask for a new one. Retries: after 5 s and 60 s; 50 failures in a row turn a webhook off. API: <code>/api/v1/webhooks</code>, CLI: <code>wx93 webhooks</code>, MCP: <code>create_webhook</code>.</p>`
     : `<p class="muted">Webhooks come with <a href="/pricing">Automation</a>.</p>`
 }
 

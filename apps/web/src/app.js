@@ -52,7 +52,8 @@ import { encodeStatic, icsText, parseLinkList, parseQrData, QR_TYPES, summary, T
 import * as Q from './qrcodes.js';
 import { crawlGuard, paidPass, trafficGuard } from './throttle.js';
 import { classify, isPrefetch } from './ua.js';
-import { EVENTS, deliver, forgetHooks, newSecret } from './webhooks.js';
+import { webhooksApi } from '@profullstack/webhooks';
+import { EVENTS, hooks as webhookHub } from './webhooks.js';
 import { refreshFooter } from './footer.js';
 import { FOOTER_SCRIPT_SRC, refreshRingFooter } from './ring-footer.js';
 
@@ -521,7 +522,7 @@ async function accountPage(c, user, extra = {}) {
     linksThisMonth(user.id),
     sql`select id, name, prefix, created_at, last_used_at from api_keys where user_id = ${user.id} and revoked_at is null order by created_at desc`,
     sql`select count(*)::int as n from passkeys where user_id = ${user.id}`,
-    sql`select id, url, events, last_status, disabled_at from webhooks where user_id = ${user.id} order by created_at`,
+    webhookHub().listEndpoints(String(user.id)),
     sql`select id, hostname, verify_token, verified_at from domains where user_id = ${user.id} order by created_at`,
     billingState(user),
   ]);
@@ -678,18 +679,42 @@ app.post('/account/webhooks', async (c) => {
   const user = await sessionUser(c);
   if (!user) return c.redirect('/signin', 303);
   try {
-    const hook = await addWebhook(user, await c.req.parseBody());
-    return accountPage(c, user, { flash: `Webhook added. Its signing secret (shown once): <code>${P.e(hook.secret)}</code>` });
+    const { secret } = await addWebhook(user, await c.req.parseBody({ all: true }));
+    return accountPage(c, user, { flash: `Webhook added. Its signing secret (shown once): <code>${P.e(secret)}</code>` });
   } catch (err) {
     return accountPage(c, user, { flash: P.e(err.message) });
   }
 });
-app.post('/account/webhooks/:id/delete', async (c) => {
+/** Test, rotate, switch on or off, delete: one form post each, from the account page. */
+app.post('/account/webhooks/:id/:action', async (c) => {
   const user = await sessionUser(c);
   if (!user) return c.redirect('/signin', 303);
-  await db()`delete from webhooks where id = ${c.req.param('id')} and user_id = ${user.id}`.catch(() => {});
-  forgetHooks(user.id);
-  return c.redirect('/account#webhooks', 303);
+  const hub = webhookHub();
+  const owner = String(user.id);
+  const id = c.req.param('id');
+  try {
+    switch (c.req.param('action')) {
+      case 'delete':
+        await hub.deleteEndpoint(owner, id);
+        return c.redirect('/account#webhooks', 303);
+      case 'test': {
+        const r = await hub.test(owner, id);
+        return accountPage(c, user, { flash: r.ok ? `Test delivered (HTTP ${r.status}).` : `Test failed: ${P.e(r.error ?? `HTTP ${r.status}`)}` });
+      }
+      case 'rotate': {
+        const { secret } = await hub.rotateSecret(owner, id);
+        return accountPage(c, user, { flash: `New signing secret (shown once; the old one has stopped working): <code>${P.e(secret)}</code>` });
+      }
+      case 'enable':
+      case 'disable':
+        await hub.updateEndpoint(owner, id, { enabled: c.req.param('action') === 'enable' });
+        return c.redirect('/account#webhooks', 303);
+      default:
+        return c.notFound();
+    }
+  } catch (err) {
+    return accountPage(c, user, { flash: P.e(err.message) });
+  }
 });
 app.post('/account/domains', async (c) => {
   const user = await sessionUser(c);
@@ -727,20 +752,12 @@ app.post('/account/links/:id/delete', async (c) => {
 
 /* --------------------------------------------------------- shared actions -- */
 
+/** A new endpoint (Automation). The hub checks https, public addresses, the event names and the 10-per-account cap. */
 async function addWebhook(user, input) {
-  const plan = await currentPlan(user);
-  requireFeature(plan, 'webhooks', 'Webhooks');
-  const { url } = checkShape(input.url);
-  if (!url.startsWith('https://')) throw new HttpError(400, 'webhooks must be https');
-  const events = Array.isArray(input.events) ? input.events.filter((x) => EVENTS.includes(x)) : EVENTS;
-  const [{ n }] = await db()`select count(*)::int as n from webhooks where user_id = ${user.id}`;
-  if (n >= 10) throw new HttpError(400, 'ten webhooks per account');
-  const secret = newSecret();
-  const [row] = await db()`
-    insert into webhooks (user_id, url, secret, events) values (${user.id}, ${url}, ${secret}, ${events.length ? events : EVENTS})
-    returning id, url, events, created_at`;
-  forgetHooks(user.id);
-  return { ...row, secret };
+  requireFeature(await currentPlan(user), 'webhooks', 'Webhooks');
+  const raw = input.events ?? input['events[]'];
+  const events = raw === undefined || raw === '' ? EVENTS : raw;
+  return webhookHub().createEndpoint(String(user.id), { url: String(input.url ?? '').trim(), events, description: input.description ?? '' });
 }
 
 const HOSTNAME = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -950,43 +967,37 @@ app.delete('/api/v1/keys/:id', async (c) => {
   }
 });
 
-app.get('/api/v1/webhooks', async (c) => {
+/*
+ * The webhooks API is the hub's (@profullstack/webhooks): list, create, read,
+ * change, delete, secret, rotate, test, deliveries and retry, scoped to the
+ * caller. Same auth as the rest of /api/v1 (API key, OAuth token or session);
+ * creating one needs Automation. GET also answers `webhooks` and POST the
+ * endpoint's fields at the top level, the shapes the API had before the hub.
+ */
+const webhookOwners = new WeakMap();
+let webhookRoutes = null;
+const webhooksRoute = async (c) => {
   try {
-    const { user } = await requireUser(c);
-    return c.json({ webhooks: await db()`select id, url, events, created_at, last_status, last_error, last_delivery_at, disabled_at from webhooks where user_id = ${user.id} order by created_at` });
+    const { user } = await caller(c);
+    const root = c.req.path.replace(/\/+$/, '') === '/api/v1/webhooks';
+    if (user) {
+      if (root && c.req.method === 'POST') requireFeature(await currentPlan(user), 'webhooks', 'Webhooks');
+      webhookOwners.set(c.req.raw, String(user.id));
+    }
+    webhookRoutes ??= webhooksApi(webhookHub(), { basePath: '/api/v1/webhooks', owner: (req) => webhookOwners.get(req) });
+    const res = await webhookRoutes(c.req.raw);
+    if (!res) return c.json({ error: 'not found' }, 404);
+    if (root && res.ok && (c.req.method === 'GET' || c.req.method === 'POST')) {
+      const out = await res.json();
+      return c.json(c.req.method === 'GET' ? { ...out, webhooks: out.endpoints } : { ...out.endpoint, ...out, shown_once: ['secret'] }, res.status);
+    }
+    return res;
   } catch (err) {
     return apiError(c, err);
   }
-});
-app.post('/api/v1/webhooks', async (c) => {
-  try {
-    const { user } = await requireUser(c);
-    return c.json({ ...(await addWebhook(user, await body(c))), shown_once: ['secret'] }, 201);
-  } catch (err) {
-    return apiError(c, err);
-  }
-});
-app.delete('/api/v1/webhooks/:id', async (c) => {
-  try {
-    const { user } = await requireUser(c);
-    const rows = await db()`delete from webhooks where id = ${c.req.param('id')} and user_id = ${user.id} returning id`.catch(() => []);
-    forgetHooks(user.id);
-    return c.json({ deleted: rows.length > 0 });
-  } catch (err) {
-    return apiError(c, err);
-  }
-});
-app.post('/api/v1/webhooks/:id/test', async (c) => {
-  try {
-    const { user } = await requireUser(c);
-    const [hook] = await db()`select id, url, secret, events from webhooks where id = ${c.req.param('id')} and user_id = ${user.id}`.catch(() => []);
-    if (!hook) throw new HttpError(404, 'no such webhook');
-    const r = await deliver({ hook, body: JSON.stringify({ id: `evt_test_${randomBytes(6).toString('hex')}`, type: 'ping', created_at: new Date().toISOString(), data: {} }), attempt: 2 });
-    return c.json(r);
-  } catch (err) {
-    return apiError(c, err);
-  }
-});
+};
+app.all('/api/v1/webhooks', webhooksRoute);
+app.all('/api/v1/webhooks/*', webhooksRoute);
 
 app.get('/api/v1/domains', async (c) => {
   try {

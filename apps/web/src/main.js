@@ -7,6 +7,7 @@ import { app } from './app.js';
 import { assertCoinpayMerchantKey, config } from './config.js';
 import { geoReady } from './geo.js';
 import { flushClicks, setDisabled } from './links.js';
+import { startWebhooks } from './webhooks.js';
 
 // Production never runs without its database: the deploy health check then fails
 // loudly instead of serving links that cannot resolve.
@@ -63,6 +64,9 @@ async function tidy() {
 void tidy();
 const tidyTimer = setInterval(tidy, 3600_000);
 
+// Customer webhooks: one drainer per process sends what is due from the Postgres outbox.
+const webhooks = startWebhooks();
+
 const server = Bun.serve({ port: config.port, fetch: app.fetch, idleTimeout: 30 });
 console.log(
   `[web] wx93 listening on :${server.port} · site ${config.siteUrl} · mail ${config.mail.enabled ? 'on' : 'off'} · payments ${config.coinpay.enabled ? 'on' : 'off'} · x402 ${config.x402.enabled ? 'on' : 'off'} · geoip ${geoReady() ? 'on' : 'off'} · ads ${config.ads.provider}`,
@@ -73,6 +77,7 @@ async function shutdown(signal) {
   watchdogs.stop(); // first, or a clean drain looks like a wedge
   clearInterval(feedTimer);
   clearInterval(tidyTimer);
+  webhooks.stop();
   await server.stop();
   await flushClicks().catch(() => {});
   await close();
