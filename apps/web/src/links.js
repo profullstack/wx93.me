@@ -50,7 +50,7 @@ export async function insertLink({
       returning *`;
     if (rows.length) {
       const link = rows[0];
-      if (userId) emit(userId, 'link.created', { link: publicLink(link) });
+      if (userId) emit(userId, 'link.created', { link: publicLink(link) }, { subject: `link:${link.code}` });
       return link;
     }
     if (alias) throw new CodeTaken(`"${alias}" is taken`);
@@ -91,16 +91,16 @@ export async function resolve(host, code) {
                (coalesce(u.is_admin, false) or exists (
                   select 1 from plan_periods p where p.user_id = l.user_id and p.starts_at <= now() and p.ends_at > now()
                )) as paid,
-               exists (select 1 from webhooks w where w.user_id = l.user_id and w.disabled_at is null
-                       and 'link.clicked' = any(w.events)) as hooks
+               exists (select 1 from webhook_endpoints w where w.owner = l.user_id::text and w.enabled = 1
+                       and (w.events like '%"link.clicked"%' or w.events like '%"link.*"%' or w.events like '%"*"%')) as hooks
         from links l left join users u on u.id = l.user_id
         where l.domain_id is null and l.code = ${code}`
     : await sql`
         select l.id, l.code, l.url, l.redirect_type, l.expires_at, l.disabled_at, l.disabled_reason,
                l.ad_free_until, l.user_id, l.created_at, l.title, l.short_host, d.hostname,
                true as paid,
-               exists (select 1 from webhooks w where w.user_id = l.user_id and w.disabled_at is null
-                       and 'link.clicked' = any(w.events)) as hooks
+               exists (select 1 from webhook_endpoints w where w.owner = l.user_id::text and w.enabled = 1
+                       and (w.events like '%"link.clicked"%' or w.events like '%"link.*"%' or w.events like '%"*"%')) as hooks
         from links l join domains d on d.id = l.domain_id
         where lower(d.hostname) = ${h} and d.verified_at is not null and l.code = ${code}`;
   const link = rows[0] ?? null;
@@ -145,7 +145,7 @@ export function recordClick(link, info) {
         device: info.device,
         referrer_host: info.referrerHost ?? null,
       },
-    });
+    }, { subject: `link:${link.code}` });
   if (buffer.length >= 500) void flushClicks();
   else timer ??= setTimeout(() => void flushClicks(), 1000);
 }

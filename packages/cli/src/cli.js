@@ -6,6 +6,7 @@
  *   wx93 ls | stats <code> | get <code> | rm <code> | qr <code> | expand <url> | bulk <file>
  *   wx93 keys [create NAME | revoke ID] | whoami | upgrade-plan pro|automation [month|year]
  *   wx93 redeem CODE | invites [create [NOTE]]
+ *   wx93 webhooks | webhook add URL [EVENTS…] | webhook test|rotate|on|off|rm ID | webhook log [ID]
  *   wx93 tui | mcp | upgrade | uninstall | version
  */
 import { spawnSync } from 'node:child_process';
@@ -39,6 +40,12 @@ const HELP = `wx93: short links for people and agents (https://wx93.me)
   wx93 plan pro|automation [month|year]   open a crypto checkout
   wx93 redeem CODE               redeem a credit code for days of Pro
   wx93 invites [create [NOTE]]   your invite links (3 per account; both sides get a week of Pro)
+  wx93 webhooks                  your webhook endpoints and the events wx93 sends (Automation)
+  wx93 webhook add URL [EVENTS…] POST link.created / link.clicked to URL (signed; prints the secret once)
+  wx93 webhook test|rotate|on|off|rm ID
+                                 send a test, replace the secret, switch it on/off, or remove it
+  wx93 webhook log [ID]          recent deliveries
+  wx93 webhook retry DELIVERY_ID send one delivery again
   wx93 tui                       everything above, as a screen
   wx93 mcp                       stdio MCP server for agents
   wx93 upgrade | uninstall | version
@@ -209,6 +216,66 @@ export async function main(argv = process.argv.slice(2)) {
         [`${r.quota.left} of ${r.quota.total} invites left; ${r.accepted} joined.`, ...r.invites.map((i) => `${i.id}  ${i.used ? 'joined' : i.revoked ? 'withdrawn' : 'open'}  ${i.note ?? ''}`)].join('\n'),
       );
       return 0;
+    }
+    case 'webhooks': {
+      if (!rest[0]) {
+        const r = await api.webhooks(auth);
+        out(
+          r,
+          [
+            ...r.endpoints.map((w) => `${w.id}  ${w.url}  ${w.events.join(',')}${w.enabled ? '' : `  OFF${w.disabled_reason ? ` (${w.disabled_reason})` : ''}`}`),
+            `events: ${r.event_types.join(', ')}`,
+          ].join('\n'),
+        );
+        return 0;
+      }
+    }
+    // falls through: `wx93 webhooks add URL` works too
+    case 'webhook': {
+      const [sub, arg, ...more] = rest;
+      const id = () => need(arg, `wx93 webhook ${sub} ID`);
+      switch (sub) {
+        case 'add':
+        case 'new':
+        case 'create': {
+          const r = await api.addWebhook(auth, need(arg, 'wx93 webhook add URL [link.created link.clicked]'), more.flatMap((x) => x.split(',')).filter(Boolean), flags.description);
+          out(r, `${r.endpoint.id}  ${r.endpoint.url}\nsecret: ${r.secret}\n(shown once; store it now)`);
+          return 0;
+        }
+        case 'test': {
+          const r = await api.testWebhook(auth, id());
+          out(r, r.ok ? `delivered (HTTP ${r.status})` : `failed: ${r.error ?? `HTTP ${r.status}`}`);
+          return r.ok ? 0 : 2;
+        }
+        case 'rotate': {
+          const r = await api.rotateWebhook(auth, id());
+          out(r, `secret: ${r.secret}\n(the old one has stopped working)`);
+          return 0;
+        }
+        case 'on':
+        case 'off': {
+          const r = await api.updateWebhook(auth, id(), { enabled: sub === 'on' });
+          out(r, `${r.id}  ${r.enabled ? 'on' : 'off'}`);
+          return 0;
+        }
+        case 'rm':
+        case 'delete':
+          out(await api.removeWebhook(auth, id()), 'removed');
+          return 0;
+        case 'log':
+        case 'deliveries': {
+          const r = await api.webhookLog(auth, arg, { limit: flags.limit });
+          out(r, r.deliveries.map((d) => `${d.created_at}  ${d.id}  ${d.event_type}  ${d.status}  ${d.last_status ?? ''} ${d.last_error ?? ''}`.trimEnd()).join('\n') || 'No deliveries.');
+          return 0;
+        }
+        case 'retry': {
+          const r = await api.retryDelivery(auth, need(arg, 'wx93 webhook retry DELIVERY_ID'));
+          out(r, `queued ${r.id}`);
+          return 0;
+        }
+        default:
+          throw new Error(`wx93 webhook ${sub ?? ''}? try add, test, rotate, on, off, rm, log or retry`);
+      }
     }
     case 'tui': {
       const { runTui } = await import('./tui.js');
