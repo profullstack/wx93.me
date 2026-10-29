@@ -21,6 +21,7 @@ import * as auth from './auth.js';
 import { applyPurchase, billingState, currentPlan, quote } from './billing.js';
 import { aliasProblem, CODE_PATH, RESERVED } from './codes.js';
 import * as K from './credits.js';
+import * as CP from './coinpay.js';
 import { config, PLANS } from './config.js';
 import { clientIp, placeOf } from './geo.js';
 import { installScript } from './install.js';
@@ -347,6 +348,15 @@ app.get('/pricing', async (c) => {
 app.get('/docs', async (c) => c.html(P.Docs({ user: (await caller(c)).user })));
 app.get('/desktop', async (c) => c.html(P.Desktop({ user: (await caller(c)).user })));
 app.get('/offline', (c) => c.html(P.Offline()));
+const SIGNIN_ERRORS = {
+  expired: 'That link has expired or was already used. Ask for a new one.',
+  coinpay: 'Sign in with CoinPay is not available right now. Use the email link.',
+  'coinpay-expired': 'The CoinPay sign-in took too long. Try again.',
+  'coinpay-state': 'The CoinPay sign-in could not be checked. Try again.',
+  'coinpay-denied': 'CoinPay sign-in was cancelled.',
+  'coinpay-failed': 'CoinPay sign-in failed. Try again, or use the email link.',
+};
+const signinError = (key) => (Object.hasOwn(SIGNIN_ERRORS, String(key)) ? SIGNIN_ERRORS[key] : null);
 for (const [path, signup] of [
   ['/signin', false],
   ['/signup', true],
@@ -357,9 +367,10 @@ for (const [path, signup] of [
         signup,
         next: c.req.query('next') ?? '',
         invite: inviteFrom(c),
-        error: c.req.query('error') === 'expired' ? 'That link has expired or was already used. Ask for a new one.' : null,
+        error: signinError(c.req.query('error')),
         guardFields: await guardFields('signin'),
         user: (await caller(c)).user,
+        coinpay: Boolean(CP.coinpayConfig()),
       }),
     ),
   );
@@ -418,7 +429,8 @@ app.post('/auth/link', async (c) => {
   }
   const verdict = await guardCheck('signin', c, fields);
   // Answer the same whatever happens next: a different answer for a known address enumerates accounts.
-  if (verdict.action !== 'drop' && verdict.action !== 'limited' && auth.EMAIL.test(email)) {
+  // A CoinPay placeholder address is never mailed (nobody can receive it).
+  if (verdict.action !== 'drop' && verdict.action !== 'limited' && auth.EMAIL.test(email) && !CP.isPlaceholderEmail(email)) {
     try {
       await sendLoginLink({ email, url: await auth.createLoginLink(email, { next: String(fields.next ?? ''), profile, invite: inviteFrom(c, fields.invite) }) });
     } catch (err) {
@@ -486,6 +498,66 @@ app.post('/auth/passkey/login/verify', async (c) => {
 
 mountOAuth(app);
 
+/* ------------------------------------------------------- Sign in with CoinPay -- */
+
+// Relying party of coinpayportal.com (src/coinpay.js). mode=login signs in or
+// makes an account bound to the CoinPay sub; mode=connect links CoinPay to the
+// signed-in account and needs a browser session.
+app.get('/api/v1/coinpay/oauth/start', async (c) => {
+  const cfg = CP.coinpayConfig();
+  if (!cfg) return c.redirect('/signin?error=coinpay', 302);
+  const mode = c.req.query('mode') === 'connect' ? 'connect' : 'login';
+  if (mode === 'connect' && !(await sessionUser(c))) return c.redirect('/signin?next=/account', 302);
+  const { cookie, url } = CP.begin(cfg, { mode, next: auth.safeNext(c.req.query('next')) });
+  setCookie(c, CP.COOKIE, cookie, { path: CP.COOKIE_PATH, httpOnly: true, secure: config.isProd, sameSite: 'Lax', maxAge: CP.COOKIE_MAX_AGE });
+  c.header('cache-control', 'no-store');
+  return c.redirect(url, 302);
+});
+
+app.get(CP.CALLBACK_PATH, async (c) => {
+  const pending = CP.decodePending(getCookie(c, CP.COOKIE));
+  deleteCookie(c, CP.COOKIE, { path: CP.COOKIE_PATH });
+  c.header('cache-control', 'no-store');
+  const cfg = CP.coinpayConfig();
+  if (!cfg) return c.redirect('/signin?error=coinpay', 302);
+  const failTo = pending?.mode === 'connect' ? '/account?coinpay=' : '/signin?error=coinpay-';
+  if (!pending) return c.redirect('/signin?error=coinpay-expired', 302);
+  if (!CP.stateMatches(pending.state, c.req.query('state'))) return c.redirect(`${failTo}state`, 302);
+  if (c.req.query('error')) return c.redirect(`${failTo}denied`, 302);
+  const code = c.req.query('code');
+  if (!code) return c.redirect(`${failTo}failed`, 302);
+  let claims;
+  try {
+    claims = await CP.claimsFor(cfg, { code, pending });
+  } catch (err) {
+    console.error(`[coinpay] sign-in failed: ${err?.message ?? err}`);
+    return c.redirect(`${failTo}failed`, 302);
+  }
+  const current = await sessionUser(c);
+  let r;
+  try {
+    r = await CP.resolveCoinpayUser({ mode: pending.mode, currentUserId: current?.id ?? null, claims }, CP.pgStore());
+  } catch (err) {
+    console.error(`[coinpay] resolve failed: ${err?.message ?? err}`);
+    return c.redirect(`${failTo}failed`, 302);
+  }
+  if (!r.ok) return c.redirect(`${failTo}${r.code}`, 302);
+  if (pending.mode === 'connect') return c.redirect('/account?coinpay=connected', 302);
+  if (current?.id !== r.userId) {
+    if (current) await auth.endSession(getCookie(c, config.session.cookie));
+    const sessionId = await auth.startSession(r.userId, c.req.header('user-agent'));
+    c.header('set-cookie', auth.sessionCookie(sessionId), { append: true });
+  }
+  return c.redirect(pending.next || '/account', 302);
+});
+
+app.post('/account/coinpay/disconnect', async (c) => {
+  const user = await sessionUser(c);
+  if (!user) return c.redirect('/signin?next=/account', 303);
+  const r = await CP.disconnectCoinpay(user, CP.pgStore());
+  return c.redirect(r.ok ? '/account?coinpay=disconnected' : '/account?coinpay=only-way-in', 303);
+});
+
 /* ---------------------------------------------------------------- profile -- */
 
 /*
@@ -526,9 +598,10 @@ async function accountPage(c, user, extra = {}) {
     sql`select id, hostname, verify_token, verified_at from domains where user_id = ${user.id} order by created_at`,
     billingState(user),
   ]);
+  const coinpay = { enabled: Boolean(CP.coinpayConfig()), identity: await CP.pgStore().identityByUser(user.id).catch(() => null), onlyWayIn: CP.isPlaceholderEmail(user.email) };
   const contact = (await profiles.get(user.id)) ?? { email: user.email };
   return c.html(
-    P.Account({ user, plan, links: links.map(publicLink), usage: { links: usage }, keys, passkeys: pk.n, hooks, domains, billing, contact, ...extra }),
+    P.Account({ user, plan, links: links.map(publicLink), usage: { links: usage }, keys, passkeys: pk.n, hooks, domains, billing, contact, coinpay, ...extra }),
   );
 }
 
@@ -546,7 +619,7 @@ app.get('/account', async (c) => {
     : bonus
       ? `Welcome. Your invite added ${Number(bonus.days)} days of Pro to this account.`
       : null;
-  return accountPage(c, user, { flash });
+  return accountPage(c, user, { flash, coinpayStatus: c.req.query('coinpay') ?? null });
 });
 
 /* ------------------------------------------------------- codes + invites -- */
@@ -1489,7 +1562,7 @@ app.post('/webhooks/coinpay', async (c) => {
     });
     if (receipt) {
       const [u] = await db()`select email from users where id = ${receipt.userId}`;
-      if (u) sendReceipt({ email: u.email, ...receipt }).catch((err) => console.error(`[mail] receipt: ${err?.message ?? err}`));
+      if (u && !CP.isPlaceholderEmail(u.email)) sendReceipt({ email: u.email, ...receipt }).catch((err) => console.error(`[mail] receipt: ${err?.message ?? err}`));
     }
     return c.json({ ok: true, ...result });
   } catch (err) {

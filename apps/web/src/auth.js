@@ -99,7 +99,7 @@ export async function findOrCreateUser(email) {
 
 /* ---------------------------------------------------------------- sessions -- */
 
-async function startSession(userId, userAgent) {
+export async function startSession(userId, userAgent) {
   const id = randomBytes(32).toString('base64url');
   await db()`
     insert into sessions (id, user_id, user_agent, expires_at)

@@ -347,7 +347,7 @@ curl -s ${e(s)}/api/v1/links -H "x-crawl-pass: $(node -p "require('./pass.json')
  */
 const PROFILE_FIELDS = PROFILE_COLUMNS.filter((f) => f !== 'email');
 
-export function SignIn({ signup = false, error, next = '', invite = '', guardFields = '', user, values = {}, errors = {} }) {
+export function SignIn({ signup = false, error, next = '', invite = '', guardFields = '', user, values = {}, errors = {}, coinpay = false }) {
   return layout({
     title: signup ? 'Sign up' : 'Sign in',
     path: signup ? '/signup' : '/signin',
@@ -358,6 +358,8 @@ export function SignIn({ signup = false, error, next = '', invite = '', guardFie
 <h1>${signup ? 'Make an account with your email.' : 'Welcome back.'}</h1>
 <p class="lede">${signup ? 'No password. We email you a link; opening it makes the account. Add a passkey afterwards for one-tap sign-in.' : 'We email you a sign-in link. No password, nothing to forget.'}</p>
 ${error ? `<p class="error">${e(error)}</p>` : ''}
+${coinpay ? `<div class="card stack"><a class="btn primary" data-coinpay-signin href="/api/v1/coinpay/oauth/start?mode=login${next ? `&amp;next=${e(encodeURIComponent(next))}` : ''}">${signup ? 'Sign up with CoinPay' : 'Sign in with CoinPay'}</a><p class="muted">One CoinPay account works across every Profullstack app.</p></div>
+<p class="muted">Or with your email:</p>` : ''}
 <form method="post" action="/auth/link" class="card stack">
 <label for="email">Email</label>
 <input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com"${values.email ? ` value="${e(values.email)}"` : ''}>
@@ -385,7 +387,7 @@ export function Sent({ email, user }) {
   });
 }
 
-export function Account({ user, plan, links, usage, keys, passkeys, hooks, domains, billing, created, flash, redeemError, contact = {}, contactErrors = {} }) {
+export function Account({ user, plan, links, usage, keys, passkeys, hooks, domains, billing, created, flash, redeemError, contact = {}, contactErrors = {}, coinpay = {}, coinpayStatus = null }) {
   const rows = links
     .map(
       (l) => `<tr><td><a href="${e(l.short_url)}" class="mono">${e(l.short_url.replace(/^https?:\/\//, ''))}</a>${l.disabled ? ' <span class="pill bad">disabled</span>' : ''}</td>
@@ -399,7 +401,7 @@ export function Account({ user, plan, links, usage, keys, passkeys, hooks, domai
     user,
     body: `<section class="narrow wide">
 <p class="eyebrow">Account</p>
-<h1>${e(user.email)}</h1>
+<h1>${coinpay.onlyWayIn ? 'Your CoinPay account' : e(user.email)}</h1>
 ${flash ? `<p class="hint">${flash}</p>` : ''}
 <div class="grid3">
 <div class="card"><h3>Plan</h3><p class="price small">${e(plan.name)}${plan.staff ? ' (staff)' : ''}</p>
@@ -409,6 +411,7 @@ ${flash ? `<p class="hint">${flash}</p>` : ''}
 <div class="card"><h3>Sign-in</h3><p class="muted">${passkeys} passkey${passkeys === 1 ? '' : 's'} on this account.</p>
 <button class="btn small js-only" hidden data-passkey-register type="button">Add a passkey</button><p class="muted" data-passkey-status></p>
 <form method="post" action="/auth/signout"><button class="btn small">Sign out</button></form></div>
+${coinpayCard(coinpay, coinpayStatus)}
 </div>
 
 <div class="grid3">
@@ -437,7 +440,7 @@ ${plan.aliases ? `<div class="row"><label>${e(config.host)}/<input name="alias" 
 ${links.length ? `<table class="tbl links"><tr><th>Short</th><th>Destination</th><th>People</th><th></th></tr>${rows}</table>` : '<p class="muted">None yet.</p>'}
 
 <h2 id="contact">Contact details</h2>
-<p class="muted">Private to your account. Sent with ${e(user.email)}.</p>
+<p class="muted">Private to your account.${coinpay.onlyWayIn ? '' : ` Sent with ${e(user.email)}.`}</p>
 <form method="post" action="/account/profile" class="card stack">
 ${renderProfileFields({ fields: PROFILE_FIELDS, values: contact ?? {}, errors: contactErrors })}
 <button class="btn">Save contact details</button>
@@ -479,6 +482,30 @@ ${
 }
 </section>`,
   });
+}
+
+const COINPAY_STATUS = {
+  connected: 'CoinPay connected.',
+  disconnected: 'CoinPay disconnected.',
+  'only-way-in': 'CoinPay is the only way to sign in to this account, so it cannot be disconnected.',
+  not_signed_in: 'Sign in first, then connect CoinPay.',
+  linked_elsewhere: 'That CoinPay account is already connected to another wx93 account.',
+  already_connected: 'This account is already connected to a different CoinPay account. Disconnect it first.',
+  state: 'The CoinPay request could not be checked. Try again.',
+  denied: 'CoinPay connection was cancelled.',
+  failed: 'Connecting CoinPay failed. Try again.',
+};
+
+/** Account -> CoinPay: connect (signed in only) or disconnect (not when it is the only way in). */
+function coinpayCard({ enabled = false, identity = null, onlyWayIn = false } = {}, status = null) {
+  if (!enabled && !identity) return '';
+  const msg = status && Object.hasOwn(COINPAY_STATUS, status) ? `<p class="${status === 'connected' || status === 'disconnected' ? 'hint' : 'error'}">${e(COINPAY_STATUS[status])}</p>` : '';
+  const body = identity
+    ? `<p class="muted">Connected${identity.coinpay_email ? ` as ${e(identity.coinpay_email)} (unverified, from CoinPay)` : ''}.</p>
+${onlyWayIn ? '<p class="muted">This account was made with CoinPay, so it stays connected.</p>' : '<form method="post" action="/account/coinpay/disconnect"><button class="btn small">Disconnect CoinPay</button></form>'}`
+    : `<p class="muted">Sign in to wx93 with your CoinPay account. One CoinPay account works across every Profullstack app.</p>
+<a class="btn small" href="/api/v1/coinpay/oauth/start?mode=connect">Connect CoinPay</a>`;
+  return `<div class="card" id="coinpay"><h3>CoinPay</h3>${msg}${body}</div>`;
 }
 
 const bars = (rows, total) =>
