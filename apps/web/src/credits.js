@@ -2,6 +2,7 @@ import { db } from '@wx93/db';
 import { Affiliates, postgresStore as affiliateStore } from '@profullstack/affiliates';
 import { Credits, postgresStore as creditStore } from '@profullstack/redeem-credits';
 import disposable from 'disposable-email-domains' with { type: 'json' };
+import { isPlaceholderEmail } from './coinpay.js';
 
 /**
  * Credit codes and invites.
@@ -137,6 +138,8 @@ export async function inviteProblem(user, { created }, sql = db()) {
   if (!created || Date.now() - new Date(user.created_at).getTime() > NEW_ACCOUNT_MS) return 'invites are for new accounts';
   if (user.is_admin) return 'staff accounts do not take invites';
   if (isDisposable(user.email)) return 'throwaway email addresses cannot take an invite';
+  // A CoinPay-only account has no verified email (its address is our placeholder).
+  if (isPlaceholderEmail(user.email)) return 'invites need an account made with a verified email';
   // Another account on the same mailbox (a +tag or Gmail dot alias) is the same person.
   const box = mailbox(user.email);
   const others = await sql`select email from users where id <> ${user.id} and split_part(lower(email), '@', 2) = ${user.email.toLowerCase().split('@')[1]}`;
