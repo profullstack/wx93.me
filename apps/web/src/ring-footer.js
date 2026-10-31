@@ -1,7 +1,6 @@
 /**
- * The shared Profullstack footer (@profullstack/footer): copyright and the
- * webring nav, from the template published on jsDelivr @latest. It sits under
- * wx93's own footer row and above the pit.world footer.
+ * The site's only footer: @profullstack/footer supplies the site links,
+ * attribution, copyright, badges and webring navigation.
  *
  * The page templates are synchronous, so a middleware refreshes the rendered
  * string (footerHtml caches the template for an hour) and the pages read the last
@@ -10,7 +9,21 @@
 import { createHash } from 'node:crypto';
 import { footerHtml, footerHtmlSync, subscribeForm } from '@profullstack/footer';
 
-const OPTIONS = { site: 'https://wx93.me/' };
+const OPTIONS = {
+  site: 'https://wx93.me/',
+  links: [
+    { label: 'QR code generator', href: '/qr' },
+    { label: 'Pricing', href: '/pricing' },
+    { label: 'Docs and API', href: '/docs' },
+    { label: 'CLI', href: '/docs#cli' },
+    { label: 'llms.txt', href: '/llms.txt' },
+    { label: 'Report a link', href: '/report' },
+    { label: 'Abuse', href: '/docs#abuse' },
+    { label: 'Privacy', href: '/docs#privacy' },
+    { label: 'Source', href: 'https://github.com/profullstack/wx93.me' },
+    { label: 'DB-IP attribution (CC BY 4.0)', href: 'https://db-ip.com' },
+  ],
+};
 
 /**
  * The CSP source for the footer's inline newsletter script (wireSubscribe, footer 0.4.0+), as

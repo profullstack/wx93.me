@@ -55,7 +55,6 @@ import { crawlGuard, paidPass, trafficGuard } from './throttle.js';
 import { classify, isPrefetch } from './ua.js';
 import { webhooksApi } from '@profullstack/webhooks';
 import { EVENTS, hooks as webhookHub } from './webhooks.js';
-import { refreshFooter } from './footer.js';
 import { FOOTER_SCRIPT_SRC, refreshRingFooter } from './ring-footer.js';
 
 export const app = new Hono();
@@ -84,12 +83,11 @@ const csp = ({ tracker = true } = {}) =>
     "object-src 'none'",
   ].join('; ');
 
-// The webring and pit.world footers refresh at most hourly. The home
-// page waits for it; every other path (short links above all) refreshes in the
-// background and renders the last good copy, so a redirect never waits on a CDN.
+// Refresh the shared site footer at most hourly. The home page waits for it;
+// every other path refreshes in the background, so redirects never wait on a CDN.
 app.use('*', async (c, next) => {
   if (c.req.method === 'GET') {
-    const refreshed = Promise.all([refreshRingFooter(), refreshFooter()]);
+    const refreshed = refreshRingFooter();
     if (c.req.path === '/') await refreshed;
   }
   await next();

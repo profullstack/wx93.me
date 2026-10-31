@@ -1,6 +1,5 @@
 import { COLUMNS as PROFILE_COLUMNS, renderProfileFields } from '@profullstack/profile';
 import { adNetworkMeta, renderAd } from './ads.js';
-import { siteFooter } from './footer.js';
 import { ringFooter } from './ring-footer.js';
 import { config, PLANS } from './config.js';
 import { DEFAULT_STYLE, DOTS, ECC, EYES, layoutQr, parseStyle, renderSvg } from './qr.js';
@@ -70,7 +69,7 @@ ${bare ? '' : nav(user)}
 <main>
 ${body}
 </main>
-${bare ? '' : footer()}
+${bare ? '' : ringFooter()}
 ${bare ? '' : `<script src="${e(site)}/assets/app.js?v=${JS_V}" defer></script>`}
 </body>
 </html>`;
@@ -81,16 +80,6 @@ function nav(user) {
 <nav><a href="/qr">QR codes</a><a href="/pricing">Pricing</a><a href="/docs">Docs</a><a href="/docs#cli">CLI</a>${
     user ? `<a class="btn small" href="/account">Account</a>` : `<a href="/signin">Sign in</a><a class="btn small primary" href="/signup">Sign up</a>`
   }</nav></header>`;
-}
-
-function footer() {
-  return `<footer class="foot">
-<p><a class="brand" href="/"><img src="/logo.svg" alt="" width="18" height="18"><span>wx93</span></a></p>
-<nav><a href="/qr">QR code generator</a><a href="/pricing">Pricing</a><a href="/docs">Docs and API</a><a href="/llms.txt">llms.txt</a><a href="/report">Report a link</a><a href="/docs#abuse">Abuse</a><a href="/docs#privacy">Privacy</a><a href="https://github.com/profullstack/wx93.me">Source</a></nav>
-<p class="tiny muted">Country and city lookups by <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0).</p>
-</footer>
-${ringFooter()}
-${siteFooter()}`;
 }
 
 /* ------------------------------------------------------------------ forms -- */
