@@ -10,6 +10,7 @@ import {
   createProfileStore,
   mountProfileRoutes,
   PROFILE_ENHANCE_SCRIPT,
+  saveOpenProfileContact,
   saveSignupProfile,
   validateProfile,
 } from '@profullstack/profile';
@@ -535,7 +536,16 @@ app.get(CP.CALLBACK_PATH, async (c) => {
     return c.redirect(`${failTo}failed`, 302);
   }
   if (!r.ok) return c.redirect(`${failTo}${r.code}`, 302);
-  if (pending.mode === 'connect') return c.redirect('/account?coinpay=connected', 302);
+  if (pending.mode === 'connect') {
+    if (claims.openprofileUrl) {
+      try {
+        await saveOpenProfileContact(profiles, String(r.userId), claims.openprofileUrl);
+      } catch (err) {
+        console.warn('[coinpay] OpenProfile import skipped:', err instanceof Error ? err.message : err);
+      }
+    }
+    return c.redirect('/account?coinpay=connected', 302);
+  }
   if (current?.id !== r.userId) {
     if (current) await auth.endSession(getCookie(c, config.session.cookie));
     const sessionId = await auth.startSession(r.userId, c.req.header('user-agent'));

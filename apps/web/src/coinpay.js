@@ -88,7 +88,12 @@ export async function claimsFor(cfg, { code, pending }, fetchImpl) {
   });
   const email = typeof r.email === 'string' && r.email.includes('@') ? r.email.slice(0, 320) : null;
   const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 200) : null;
-  return { sub: r.sub, email, name };
+  return {
+    sub: r.sub,
+    email,
+    name,
+    openprofileUrl: typeof r.userinfo?.openprofile_url === 'string' ? r.userinfo.openprofile_url : null,
+  };
 }
 
 /* -------------------------------------------------------------------- store -- */

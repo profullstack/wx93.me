@@ -388,6 +388,7 @@ export function Account({ user, plan, links, usage, keys, passkeys, hooks, domai
     title: 'Account',
     noindex: true,
     user,
+    head: '<script src="/assets/profile.js" defer></script>',
     body: `<section class="narrow wide">
 <p class="eyebrow">Account</p>
 <h1>${coinpay.onlyWayIn ? 'Your CoinPay account' : e(user.email)}</h1>
@@ -431,7 +432,7 @@ ${links.length ? `<table class="tbl links"><tr><th>Short</th><th>Destination</th
 <h2 id="contact">Contact details</h2>
 <p class="muted">Private to your account.${coinpay.onlyWayIn ? '' : ` Sent with ${e(user.email)}.`}</p>
 <form method="post" action="/account/profile" class="card stack">
-${renderProfileFields({ fields: PROFILE_FIELDS, values: contact ?? {}, errors: contactErrors })}
+${renderProfileFields({ fields: PROFILE_FIELDS, values: contact ?? {}, errors: contactErrors, importOpenProfile: true })}
 <button class="btn">Save contact details</button>
 </form>
 
