@@ -33,7 +33,6 @@ export async function insertLink({
   adFreeUntil = null,
   redirectType = 302,
   title = null,
-  shortHost = null,
   expiresAt = null,
   ip = null,
 }) {
@@ -42,9 +41,9 @@ export async function insertLink({
   for (let attempt = 0; attempt < 8; attempt++) {
     const code = alias ?? randomCode(length);
     const rows = await sql`
-      insert into links (code, domain_id, short_host, url, host, title, user_id, api_key_id, payer, ad_free_until,
+      insert into links (code, domain_id, url, host, title, user_id, api_key_id, payer, ad_free_until,
                          redirect_type, custom, expires_at, created_ip)
-      values (${code}, ${domainId}, ${shortHost}, ${url}, ${host}, ${title}, ${userId}, ${apiKeyId}, ${payer}, ${adFreeUntil},
+      values (${code}, ${domainId}, ${url}, ${host}, ${title}, ${userId}, ${apiKeyId}, ${payer}, ${adFreeUntil},
               ${redirectType}, ${Boolean(alias)}, ${expiresAt}, ${ip})
       on conflict do nothing
       returning *`;
@@ -87,7 +86,7 @@ export async function resolve(host, code) {
   const rows = own
     ? await sql`
         select l.id, l.code, l.url, l.redirect_type, l.expires_at, l.disabled_at, l.disabled_reason,
-               l.ad_free_until, l.user_id, l.created_at, l.title, l.short_host, null::text as hostname,
+               l.ad_free_until, l.user_id, l.created_at, l.title, null::text as hostname,
                (coalesce(u.is_admin, false) or exists (
                   select 1 from plan_periods p where p.user_id = l.user_id and p.starts_at <= now() and p.ends_at > now()
                )) as paid,
@@ -97,7 +96,7 @@ export async function resolve(host, code) {
         where l.domain_id is null and l.code = ${code}`
     : await sql`
         select l.id, l.code, l.url, l.redirect_type, l.expires_at, l.disabled_at, l.disabled_reason,
-               l.ad_free_until, l.user_id, l.created_at, l.title, l.short_host, d.hostname,
+               l.ad_free_until, l.user_id, l.created_at, l.title, d.hostname,
                true as paid,
                exists (select 1 from webhook_endpoints w where w.owner = l.user_id::text and w.enabled = 1
                        and (w.events like '%"link.clicked"%' or w.events like '%"link.*"%' or w.events like '%"*"%')) as hooks
@@ -192,11 +191,10 @@ export async function flushClicks() {
 
 export function shortUrl(link) {
   if (link.hostname) return `https://${link.hostname}/${link.code}`;
-  if (link.short_host && link.short_host !== config.host) return `https://${link.short_host}/${link.code}`;
   return `${config.siteUrl}/${link.code}`;
 }
 
-/** wx93.me, 9xq.me (and www.), plus localhost for development. */
+/** wx93.me (and www.), plus localhost for development. */
 export function isOwnHost(host) {
   const h = String(host ?? '').toLowerCase().replace(/:\d+$/, '').replace(/^www\./, '');
   return h === 'localhost' || h === '127.0.0.1' || config.shortHosts.includes(h);
@@ -210,7 +208,7 @@ export function publicLink(l) {
     short_url: shortUrl(l),
     url: l.url,
     title: l.title ?? null,
-    domain: l.hostname ?? l.short_host ?? config.host,
+    domain: l.hostname ?? config.host,
     custom: Boolean(l.custom),
     redirect_type: l.redirect_type,
     clicks: Number(l.clicks ?? 0),
@@ -227,7 +225,7 @@ export function publicLink(l) {
 
 /** Where a link's QR code is served, in each format. The code encodes `<short url>?qr` so scans count apart. */
 function qrUrls(l) {
-  const q = l.hostname || l.short_host ? `?domain=${encodeURIComponent(l.hostname ?? l.short_host)}` : '';
+  const q = l.hostname ? `?domain=${encodeURIComponent(l.hostname)}` : '';
   const at = (ext) => `${config.siteUrl}/qr/${l.code}.${ext}${q}`;
   return { qr_svg: at('svg'), qr_png: at('png'), qr_pdf: at('pdf') };
 }

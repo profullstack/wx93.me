@@ -36,7 +36,6 @@ beforeAll(async () => {
   if (!HAS_DB) return;
   Object.assign(process.env, {
     SITE_URL: SITE,
-    ALT_HOSTS: '9xq.me',
     ADMIN_EMAILS: 'staff@example.test',
     COINPAY_API_KEY: 'cp_test_x',
     COINPAY_BUSINESS_ID: 'biz',
@@ -115,26 +114,14 @@ d('anonymous links and how they answer', () => {
     expect(Number(row.clicks)).toBeGreaterThanOrEqual(5);
     expect(Number(row.human_clicks)).toBe(1);
   });
-  test('the second short domain resolves the same code, and sends the rest to the brand', async () => {
-    const res = await req(`/${link.code}`, { headers: { host: '9xq.me', 'user-agent': 'curl/8' } });
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('https://example.com/a?b=1');
-    const home = await req('/pricing?x=1', { headers: { host: '9xq.me' } });
-    expect(home.status).toBe(301);
-    expect(home.headers.get('location')).toBe(`${SITE}/pricing?x=1`);
-    const made = await (await req('/api/v1/links', { method: 'POST', json: { url: 'https://example.com/z', domain: '9xq.me' } })).json();
-    expect(made.short_url).toBe(`https://9xq.me/${made.code}`);
-    expect((await req(`/${made.code}`, { headers: { 'user-agent': 'curl/8' } })).status).toBe(302);
-  });
-  test('a page on the second short domain is branded and styled from wx93.me', async () => {
-    const res = await req(`/${link.code}`, { headers: { host: '9xq.me', 'user-agent': CHROME } });
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain(`<link rel="stylesheet" href="${SITE}/assets/app.css`);
-    expect(html).toContain(`<meta property="og:image" content="${SITE}/icons/og.png?v=2">`);
-    expect(html).toContain(`<a class="brand" href="${SITE}/">`);
-    expect(html).not.toContain('9xq');
-    expect(res.headers.get('content-security-policy')).toContain(`style-src 'self' ${new URL(SITE).origin}`);
+  test('the retired short domain is rejected and cannot be selected for new links', async () => {
+    const retired = await req(`/${link.code}`, { headers: { host: '9xq.me', 'user-agent': 'curl/8' } });
+    expect(retired.status).toBe(410);
+    const page = await req('/pricing?x=1', { headers: { host: 'www.9xq.me' } });
+    expect(page.status).toBe(410);
+    const made = await req('/api/v1/links', { method: 'POST', json: { url: 'https://example.com/z', domain: '9xq.me' } });
+    expect(made.status).toBe(400);
+    expect(await made.text()).toContain('no longer supported');
   });
   test('unknown, expired and bad input', async () => {
     expect((await req('/zzzzzz')).status).toBe(404);
@@ -445,10 +432,9 @@ d('QR codes', () => {
     expect(await restyle.text()).toContain('too close to scan');
   });
 
-  test('9xq.me serves a code in every format', async () => {
+  test('the retired short domain does not serve QR codes', async () => {
     const res = await app.fetch(new Request(`http://9xq.me/qr/${menu.link.code}.png`, { headers: { host: '9xq.me', 'x-real-ip': ip() } }));
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.status).toBe(410);
   });
 
   test('the hosted MCP makes a code and returns its picture', async () => {
@@ -669,10 +655,9 @@ d('credit codes and invites', () => {
     for (const a of ['invites', 'Invites', 'redeem', 'credits', 'invite']) expect(aliasProblem(a)).toContain('reserved');
     const bad = await req('/i/<script>', { headers: { 'user-agent': CHROME } });
     expect(bad.status).toBe(404);
-    // On the second short domain the invite pages go to the brand host.
+    // The retired host is rejected for every path.
     const alt = await req('/i/INV-AAAA-BBBB-CCCC', { headers: { host: '9xq.me' } });
-    expect(alt.status).toBe(301);
-    expect(alt.headers.get('location')).toBe(`${SITE}/i/INV-AAAA-BBBB-CCCC`);
+    expect(alt.status).toBe(410);
   });
 
   test('sign-in next only goes to a same-origin path', async () => {

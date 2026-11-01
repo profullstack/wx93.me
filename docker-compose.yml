@@ -17,7 +17,6 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:wx93@db:5432/wx93
       SITE_URL: http://localhost:3000
-      ALT_HOSTS: ""
       AD_PROVIDER: house
     depends_on:
       db: { condition: service_healthy }

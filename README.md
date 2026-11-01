@@ -6,10 +6,8 @@ every terminal. Stats, QR codes, custom aliases, expiry, webhooks and custom
 domains, with every surface the fleet ships: web + PWA, REST API, CLI with an
 hqtui TUI, MCP server (stdio and hosted), Electron desktop, and `/llms.txt`.
 
-Live at **https://wx93.me**. `9xq.me` is a second short domain on the same
-links: every code works on both (`wx93.me/abc123` and `9xq.me/abc123` are one
-link with one set of stats), and anything on 9xq.me that is not a short code
-301s to wx93.me.
+Live at **https://wx93.me**. Links use wx93.me by default; Automation accounts
+can use a verified custom domain.
 
 ## Pricing
 
@@ -34,7 +32,7 @@ curl -s https://wx93.me/api/v1/links -H 'content-type: application/json' -d '{"u
 
 # CLI + TUI (installs under ~/.local, never sudo; brings the desktop app on a desktop)
 curl -fsSL https://wx93.me/install | sh        # --cli-only | --desktop
-wx93 https://example.com/long --alias launch --domain 9xq.me
+wx93 https://example.com/long --alias launch
 wx93 login        # OAuth 2.1 + PKCE in the browser (--manual over SSH)
 wx93 ls | wx93 stats launch | wx93 qr launch | wx93 tui
 
@@ -113,7 +111,6 @@ the logicsrc vault `wx93-me--prod`, never a committed `.env`. Settings:
 | --- | --- |
 | `DATABASE_URL` | Postgres |
 | `SITE_URL` | `https://wx93.me` (passkey rpID comes from it) |
-| `ALT_HOSTS` | second short domains, default `9xq.me` |
 | `RESEND_API_KEY`, `MAIL_FROM` | sign-in mail |
 | `COINPAY_API_KEY`, `COINPAY_BUSINESS_ID`, `COINPAY_WEBHOOK_SECRET` | plans |
 | `COINPAY_X402_KEY`, `X402_PAY_TO`, `X402_ENABLED=1` | x402 |
