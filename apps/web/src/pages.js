@@ -241,7 +241,7 @@ export function Docs({ user }) {
   -H 'authorization: Bearer wx93_live_…' -H 'content-type: application/json' \\
   -d '{"url":"https://example.com/long","alias":"launch","expires_in":"30d"}'</pre>
 <table class="tbl">
-<tr><td><code>POST /api/v1/links</code></td><td><code>{url, alias?, title?, expires_at? | expires_in? ("7d", "12h"), redirect_type? (301|302|307|308), domain? ("wx93.me" default, "9xq.me", or your verified domain)}</code> → 201 link</td></tr>
+<tr><td><code>POST /api/v1/links</code></td><td><code>{url, alias?, title?, expires_at? | expires_in? ("7d", "12h"), redirect_type? (301|302|307|308), domain? ("wx93.me" default or your verified domain)}</code> → 201 link</td></tr>
 <tr><td><code>POST /api/v1/links/bulk</code></td><td><code>{links: [{url, alias?, …}]}</code>, up to 1,000 (Automation) → per-item results</td></tr>
 <tr><td><code>GET /api/v1/links</code></td><td>your links, newest first; <code>?limit=&amp;before=&amp;q=</code></td></tr>
 <tr><td><code>GET /api/v1/links/{id|code}</code></td><td>one link</td></tr>
@@ -266,7 +266,7 @@ export function Docs({ user }) {
 <li>Pro and Automation links: the HTTP redirect you chose (302 by default). 301 and 308 are cacheable for an hour, so repeat visits from one browser may not be counted.</li>
 <li>Free links, opened by a person in a browser: a page with an ad and a ${config.links.interstitialSeconds} second <code>&lt;meta http-equiv="refresh"&gt;</code>, plus a Continue link. No JavaScript involved.</li>
 <li>Free links, fetched by a crawler, a link unfurler, curl or any script: the plain 302, so previews and tools keep working.</li>
-<li>Every code works on both of our short domains: <code>wx93.me/abc123</code> and <code>9xq.me/abc123</code> are the same link, with the same stats. Pick which one a link is shown with by <code>domain</code>.</li>
+<li>Short links use <code>wx93.me</code> by default. Automation accounts can use a verified custom domain.</li>
 <li>Add <code>+</code> to any link (<code>wx93.me/abc123+</code>) to see where it goes without going there.</li>
 </ul>
 

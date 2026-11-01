@@ -19,7 +19,7 @@ import { qrTerminal } from './qr.js';
 
 const HELP = `wx93: short links for people and agents (https://wx93.me)
 
-  wx93 <url> [--alias NAME] [--expires 7d] [--title T] [--redirect 301|302|307|308] [--domain wx93.me|9xq.me|yours] [--qr]
+  wx93 <url> [--alias NAME] [--expires 7d] [--title T] [--redirect 301|302|307|308] [--domain wx93.me|yours] [--qr]
   wx93 login [--manual]          sign in through your browser (OAuth 2.1; --manual over SSH)
   wx93 login --key wx93_live_…   or use an API key from wx93.me/account
   wx93 logout | whoami

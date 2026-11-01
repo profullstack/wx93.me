@@ -7,7 +7,6 @@ import { describe, expect, test } from 'bun:test';
 import { readBarcodes } from 'zxing-wasm/reader';
 
 process.env.SITE_URL = 'https://wx93.me';
-process.env.ALT_HOSTS = '9xq.me';
 
 const { contrast, DOTS, EYES, layoutQr, parseStyle, renderPdf, renderPng, renderQr, renderSvg, sniffLogo } = await import('../apps/web/src/qr.js');
 const { encodeStatic, icsText, parseLinkList, parseQrData, QR_TYPES, summary, vcardText } = await import('../apps/web/src/qr-types.js');

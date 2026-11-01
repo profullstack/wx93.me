@@ -19,7 +19,7 @@ import { checkDestination, checkShape, DestinationError, feedStatus } from './ab
 import { adFrameOrigins } from './ads.js';
 import * as auth from './auth.js';
 import { applyPurchase, billingState, currentPlan, quote } from './billing.js';
-import { aliasProblem, CODE_PATH, RESERVED } from './codes.js';
+import { aliasProblem, CODE_PATH } from './codes.js';
 import * as K from './credits.js';
 import * as CP from './coinpay.js';
 import { config, PLANS } from './config.js';
@@ -60,12 +60,13 @@ import { FOOTER_SCRIPT_SRC, refreshRingFooter } from './ring-footer.js';
 export const app = new Hono();
 const here = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(here, '..', 'public');
+const RETIRED_SHORT_DOMAIN = '9xq.me';
 
 /* ------------------------------------------------------------ middleware -- */
 
 /** CrawlProof stats is allowed on the site pages; the interstitial passes tracker=false and stays script-free. */
 const CRAWLPROOF = 'https://crawlproof.com';
-/** Pages served on a second short domain (9xq.me) load their CSS and script from wx93.me. */
+/** The site origin used for canonical assets, redirects and passkeys. */
 const SITE_ORIGIN = new URL(config.siteUrl).origin;
 const csp = ({ tracker = true } = {}) =>
   [
@@ -82,6 +83,15 @@ const csp = ({ tracker = true } = {}) =>
     "form-action 'self' https://coinpayportal.com https://pit.world http://127.0.0.1:* http://localhost:*",
     "object-src 'none'",
   ].join('; ');
+
+// Make the retired alias fail closed, including while DNS caches still point
+// at this server.
+app.use('*', async (c, next) => {
+  const raw = (c.req.header('host') ?? '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  if (raw === RETIRED_SHORT_DOMAIN || raw === `www.${RETIRED_SHORT_DOMAIN}`)
+    return c.text('this domain is no longer supported', 410);
+  return next();
+});
 
 // Refresh the shared site footer at most hourly. The home page waits for it;
 // every other path refreshes in the background, so redirects never wait on a CDN.
@@ -118,28 +128,14 @@ app.use('*', async (c, next) => {
   return next();
 });
 
-/*
- * Second short domains (9xq.me): only short codes, their `+` previews and their
- * QR codes are served there. Everything else is the app, which lives on the
- * primary host, so it 301s to the same path on wx93.me.
- */
+// www.wx93.me is an alias: one canonical origin for pages, passkeys and cookies.
 app.use('*', async (c, next) => {
-  const raw = (c.req.header('host') ?? '').toLowerCase().replace(/:\d+$/, '');
-  // www.wx93.me is an alias: one canonical origin for pages, passkeys and cookies.
-  if (raw === `www.${config.host}`) {
-    const u = new URL(c.req.url);
-    return c.redirect(`${config.siteUrl}${u.pathname}${u.search}`, 301);
-  }
-  const host = raw.replace(/^www\./, '');
-  if (!config.altHosts.includes(host)) return next();
-  const path = c.req.path;
-  if (/^\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\+?$/.test(path) && !RESERVED.has(path.slice(1).replace(/\+$/, '').toLowerCase())) return next();
-  if (/^\/qr\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.(svg|png|pdf)$/.test(path) || path === '/robots.txt' || path === '/healthz') return next();
+  const raw = (c.req.header('host') ?? '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  if (raw !== `www.${config.host}`) return next();
   const u = new URL(c.req.url);
-  return c.redirect(`${config.siteUrl}${path}${u.search}`, 301);
+  return c.redirect(`${config.siteUrl}${u.pathname}${u.search}`, 301);
 });
 
-// After the alt-host redirect: /crawl and the pages live on the primary host only.
 app.use('*', crawlGuard());
 
 /* ---------------------------------------------------------------- helpers -- */
@@ -221,7 +217,7 @@ async function createOne({ who, plan, input, pass, ip }) {
   const redirectType = parseRedirectType(input.redirect_type);
   if (redirectType && redirectType !== 302 && !plan.aliases) requireFeature(plan, 'aliases', 'Redirect types');
 
-  const { domainId, hostname, shortHost } = await pickDomain(who, plan, input.domain);
+  const { domainId, hostname } = await pickDomain(who, plan, input.domain);
 
   const link = await insertLink({
     url,
@@ -234,23 +230,22 @@ async function createOne({ who, plan, input, pass, ip }) {
     adFreeUntil: pass ? new Date(Date.now() + config.x402.adFreeDays * 86400_000) : null,
     redirectType: redirectType ?? 302,
     title: input.title ? String(input.title).slice(0, 200) : null,
-    shortHost,
     expiresAt: parseExpiry(input),
     ip: ip ? pepper(ip) : null,
   });
   return publicLink({ ...link, hostname, paid: !plan.interstitial });
 }
 
-/** Which host a new link is shown on: ours (wx93.me, 9xq.me) or a verified custom domain. */
+/** Which host a new link is shown on: wx93.me or a verified custom domain. */
 async function pickDomain(who, plan, domain) {
-  const wanted = domain ? String(domain).trim().toLowerCase().replace(/^www\./, '') : '';
-  if (wanted && config.altHosts.includes(wanted)) return { domainId: null, hostname: null, shortHost: wanted };
-  if (!wanted || wanted === config.host) return { domainId: null, hostname: null, shortHost: null };
+  const wanted = domain ? String(domain).trim().toLowerCase().replace(/^www\./, '').replace(/\.$/, '') : '';
+  if (wanted === RETIRED_SHORT_DOMAIN) throw new HttpError(400, `${RETIRED_SHORT_DOMAIN} is no longer supported; use ${config.host}`);
+  if (!wanted || wanted === config.host) return { domainId: null, hostname: null };
   if (!who.user) throw new HttpError(401, 'custom domains need an account');
   if (!plan.domains) requireFeature(plan, 'domains', 'Custom domains');
   const [d] = await db()`select id, hostname from domains where user_id = ${who.user.id} and lower(hostname) = ${String(domain).trim().toLowerCase()} and verified_at is not null`;
   if (!d) throw new HttpError(400, `${domain} is not a verified domain on your account`);
-  return { domainId: d.id, hostname: d.hostname, shortHost: null };
+  return { domainId: d.id, hostname: d.hostname };
 }
 
 /** Quotas, checked before any work. Returns the plan. */
@@ -1146,7 +1141,7 @@ async function createQrCode({ who, plan, input, ip }) {
       const link = await createOne({ who, plan, input: { url: data.url, domain: input.domain, alias: input.alias || null, title: name }, ip });
       linkId = link.id;
     } else {
-      const { domainId, shortHost } = await pickDomain(who, plan, input.domain);
+      const { domainId } = await pickDomain(who, plan, input.domain);
       const alias = input.alias ? String(input.alias).trim() : null;
       if (alias) {
         requireFeature(plan, 'aliases', 'Custom aliases');
@@ -1158,7 +1153,6 @@ async function createQrCode({ who, plan, input, ip }) {
         host: config.host,
         alias,
         domainId,
-        shortHost,
         userId: who.user.id,
         apiKeyId: who.apiKeyId ?? null,
         title: name,
@@ -1773,7 +1767,7 @@ POST ${config.siteUrl}/api/v1/links  {"url": "https://...", "alias"?: "...", "ex
 - GET /api/v1/qr/{id}/image.svg|.png|.pdf?size=  ·  GET /api/v1/qr/{id}/stats?days=30&tz=America/New_York&source=qr|link
 - Stats: scans, unique visitors, countries, cities, devices, OS, browsers, referrers, a 7x24 weekday-by-hour heatmap, week over week, last hour + recent scans.
 - No account: GET|POST /qr/make.svg|.png|.pdf?type=wifi&ssid=...&password=... (static, nothing saved)
-- Two short domains, one namespace: every code works on wx93.me and 9xq.me. Pick the one a link is shown with by "domain": "9xq.me".
+- Short links use wx93.me or a verified custom domain.
 - POST /api/v1/reports {"url", "reason": "phishing|malware|spam|illegal|other"}
 
 ## Credit codes and invites (sign in)
@@ -1799,8 +1793,7 @@ app.get('/qr/:file{[A-Za-z0-9][A-Za-z0-9_-]{0,63}\\.(svg|png|pdf)}', async (c) =
   const host = c.req.query('domain') || c.req.header('host') || config.host;
   const link = await resolve(host, code);
   if (!link || link.disabled_at) return c.text('no such link', 404);
-  const asked = String(c.req.query('domain') ?? '').toLowerCase().replace(/^www\./, '');
-  const text = link.hostname ? `https://${link.hostname}/${link.code}` : config.altHosts.includes(asked) ? `https://${asked}/${link.code}` : shortUrl(link);
+  const text = link.hostname ? `https://${link.hostname}/${link.code}` : shortUrl(link);
   const saved = await Q.qrForLink(link.id);
   return qrImage(c, scanUrl(text), { style: saved?.style, logo: Q.logoOf(saved), format: extOf(file), name: link.code, cache: 'public, max-age=3600' });
 });

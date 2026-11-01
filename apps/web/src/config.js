@@ -96,19 +96,9 @@ export const config = {
   get host() {
     return new URL(this.siteUrl).hostname;
   },
-  /**
-   * Second short domains (9xq.me). Every code resolves on each of them exactly as
-   * on the primary; anything that is not a short code 301s to the primary.
-   */
-  get altHosts() {
-    return env('ALT_HOSTS', '9xq.me')
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
-  },
-  /** Every host that serves our own codes, primary first. */
+  /** The host that serves our own short codes. */
   get shortHosts() {
-    return [this.host, ...this.altHosts];
+    return [this.host];
   },
   get adminEmails() {
     return env('ADMIN_EMAILS', '')

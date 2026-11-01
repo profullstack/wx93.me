@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.SITE_URL = 'https://wx93.me';
-process.env.ALT_HOSTS = '9xq.me';
 
 const { classify, isPrefetch } = await import('../apps/web/src/ua.js');
 const { aliasProblem, randomCode, CODE_PATH } = await import('../apps/web/src/codes.js');
@@ -123,7 +122,6 @@ describe('destination shape', () => {
     bad('https://bit.ly/abc', /other shorteners/);
     bad('https://www.tinyurl.com/abc', /other shorteners/);
     bad('https://wx93.me/abc', /already/);
-    bad('https://9xq.me/abc', /already/);
     bad('https://example.com:22/', /ports/);
     bad('https://exa mple.com', /spaces/);
     bad(`https://example.com/${'a'.repeat(2100)}`, /2048/);
