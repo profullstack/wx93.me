@@ -14,7 +14,7 @@
       "dependencies": {
         "@profullstack/affiliates": "0.3.0",
         "@profullstack/auth-system": "^0.8.3",
-        "@profullstack/coinpay-onboard": "0.3.1",
+        "@profullstack/coinpay-onboard": "^0.5.0",
         "@profullstack/footer": "latest",
         "@profullstack/form-guard": "^0.2.2",
         "@profullstack/profile": "0.1.8",
@@ -112,7 +112,7 @@
 
     "@profullstack/auth-system": ["@profullstack/auth-system@0.8.3", "", { "dependencies": { "bcryptjs": "^2.4.3", "jsonwebtoken": "^9.0.2", "uuid": "^11.1.0" }, "peerDependencies": { "@supabase/supabase-js": "^2.49.4", "mongodb": "^6.5.0", "mysql2": "^3.9.2", "pg": "^8.11.3", "pocketbase": "^0.21.1" }, "optionalPeers": ["@supabase/supabase-js", "mongodb", "mysql2", "pg", "pocketbase"] }, "sha512-goafDEaq8XDDCChfAfi8wvUxn1xMeGWXpr7XEH9czFU/eIq9PkehGRTy3d/YP2BGzO1iIxrTAb2m2eOMTMdYUA=="],
 
-    "@profullstack/coinpay-onboard": ["@profullstack/coinpay-onboard@0.3.1", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.32.2", "zod": "^4.6.7" }, "bin": { "coinpay-onboard": "bin/coinpay-onboard" } }, "sha512-+K7D6uaX10y+0V5sg7To1jKwNG8iCNbN9SSW6q5ACzoiDNswMox3G7gzY/Swxd128klq7ecN2Ni4JVNr50nRIQ=="],
+    "@profullstack/coinpay-onboard": ["@profullstack/coinpay-onboard@0.5.0", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.32.2", "zod": "^4.6.7" }, "bin": { "coinpay-onboard": "bin/coinpay-onboard" } }, "sha512-yqSx3pgJLP521Km+XNNn9fyjbbHppgozuGTtzTln9yy+2I0h0bjqXSpsFPwoSgVb5QcyBx+Wzv5170Qb7va1iQ=="],
 
     "@profullstack/footer": ["@profullstack/footer@0.4.0", "", { "peerDependencies": { "react": ">=18" }, "optionalPeers": ["react"], "bin": { "profullstack-footer": "bin/profullstack-footer.js" } }, "sha512-EJZnMUQmWDi9Gzx6BAjogloeaPFFSSCHtHJuC9dsXiOz8M87hfn6Z+Zx9AMYWk8s6xemPrPlkXKGB3PZugkcEA=="],
 

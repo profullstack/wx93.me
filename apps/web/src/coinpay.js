@@ -93,6 +93,7 @@ export async function claimsFor(cfg, { code, pending }, fetchImpl) {
     sub: r.sub,
     email,
     name,
+    pass: r.pass ?? { active: false, expiresAt: null },
     ...(typeof openprofileUrl === 'string' ? { openprofileUrl } : {}),
   };
 }

@@ -127,20 +127,34 @@ describe('state, nonce and PKCE', () => {
 
   const jwt = (c) => ['eyJhbGciOiJSUzI1NiJ9', Buffer.from(JSON.stringify(c)).toString('base64url'), 'sig'].join('.');
   const good = { iss: 'https://coinpayportal.com', aud: 'cp_test', sub: 's1', nonce: 'n1', exp: Math.floor(Date.now() / 1000) + 600 };
-  const fakeFetch = (idClaims, seen = {}) => async (url, init) => {
+  const fakeFetch = (idClaims, seen = {}, extra = {}) => async (url, init) => {
     if (String(url).endsWith('/api/oauth/token')) {
       seen.body = new URLSearchParams(String(init.body));
       return Response.json({ access_token: 'at', id_token: jwt(idClaims) });
     }
-    return Response.json({ sub: 's1', email: 'victim@example.com', name: 'Ann', email_verified: false });
+    return Response.json({ sub: 's1', email: 'victim@example.com', name: 'Ann', email_verified: false, ...extra });
   };
   const pending = { state: 'st', nonce: 'n1', verifier: 'v', mode: 'login', next: '' };
 
   test('the code exchange sends the verifier and the client secret, and returns the claims', async () => {
     const seen = {};
-    expect(await CP.claimsFor(cfg, { code: 'c', pending }, fakeFetch(good, seen))).toEqual({ sub: 's1', email: 'victim@example.com', name: 'Ann' });
+    expect(await CP.claimsFor(cfg, { code: 'c', pending }, fakeFetch(good, seen))).toEqual({
+      sub: 's1',
+      email: 'victim@example.com',
+      name: 'Ann',
+      pass: { active: false, expiresAt: null },
+    });
     expect(seen.body.get('code_verifier')).toBe('v');
     expect(seen.body.get('client_secret')).toBe('cps_test');
+  });
+  test('the Profullstack Pass claim comes back parsed: active only with a future expiry', async () => {
+    const exp = new Date(Date.now() + 9 * 86400_000).toISOString();
+    const on = await CP.claimsFor(cfg, { code: 'c', pending }, fakeFetch(good, {}, { pass: { active: true, expires_at: exp } }));
+    expect(on.pass.active).toBe(true);
+    expect(on.pass.expiresAt.toISOString()).toBe(exp);
+    const old = new Date(Date.now() - 1000).toISOString();
+    const off = await CP.claimsFor(cfg, { code: 'c', pending }, fakeFetch(good, {}, { pass: { active: true, expires_at: old } }));
+    expect(off.pass.active).toBe(false);
   });
   test('a wrong nonce, audience, issuer or an expired token is refused', async () => {
     for (const bad of [{ nonce: 'attacker' }, { nonce: undefined }, { aud: 'cp_other' }, { iss: 'https://evil.example' }, { exp: 1000 }]) {

@@ -111,3 +111,34 @@ export async function billingState(user, sql = db()) {
     coverage_end: periods.length ? periods[periods.length - 1].ends_at : null,
   };
 }
+
+/**
+ * Profullstack Pass (https://coinpayportal.com/pass): a CoinPay user who
+ * deposited $99 into their own CoinPay wallet gets a free month here. CoinPay
+ * sends `pass: { active, expires_at }` in userinfo, seen only at sign-in;
+ * coinpay-onboard's finishSignIn parses it to `{ active, expiresAt }` (active
+ * only with a future expiry).
+ *
+ * An active pass is full paid access (Automation, the top plan) from now until
+ * it expires: one granted plan period
+ * (grant_source `coinpay-pass:<coinpay sub>:<expires_at>`, so once per pass on
+ * the plan_periods_grant_key index). Granted time is never credited on an
+ * upgrade, and a paid term bought during the pass queues after it.
+ */
+export const PASS_URL = 'https://coinpayportal.com/pass';
+
+export async function grantPass(userId, { sub, pass }, sql = db()) {
+  const exp = pass?.expiresAt instanceof Date ? pass.expiresAt : null;
+  if (!userId || !sub || pass?.active !== true || !exp || exp.getTime() <= Date.now()) return null;
+  const source = `coinpay-pass:${sub}:${exp.toISOString()}`;
+  return sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtext(${`billing:${userId}`}))`;
+    const [p] = await tx`
+      insert into plan_periods (user_id, plan, term, starts_at, ends_at, grant_source)
+      select ${userId}, 'automation', 'month', now(), ${exp}::timestamptz, ${source}
+      where ${exp}::timestamptz > now()
+      on conflict (user_id, grant_source) where grant_source is not null do nothing
+      returning plan, starts_at, ends_at`;
+    return p ?? null;
+  });
+}

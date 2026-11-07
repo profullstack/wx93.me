@@ -19,7 +19,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { checkDestination, checkShape, DestinationError, feedStatus } from './abuse.js';
 import { adFrameOrigins } from './ads.js';
 import * as auth from './auth.js';
-import { applyPurchase, billingState, currentPlan, quote } from './billing.js';
+import { applyPurchase, billingState, currentPlan, grantPass, quote } from './billing.js';
 import { aliasProblem, CODE_PATH } from './codes.js';
 import * as K from './credits.js';
 import * as CP from './coinpay.js';
@@ -536,6 +536,13 @@ app.get(CP.CALLBACK_PATH, async (c) => {
     return c.redirect(`${failTo}failed`, 302);
   }
   if (!r.ok) return c.redirect(`${failTo}${r.code}`, 302);
+  // Profullstack Pass: seen only here, so an active one becomes Pro until it
+  // expires, bound to the CoinPay sub (never the email), once per pass.
+  try {
+    await grantPass(r.userId, { sub: claims.sub, pass: claims.pass });
+  } catch (err) {
+    console.error(`[coinpay] pass grant failed: ${err?.message ?? err}`);
+  }
   if (pending.mode === 'connect') {
     if (claims.openprofileUrl) {
       try {

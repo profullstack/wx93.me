@@ -580,6 +580,22 @@ d('credit codes and invites', () => {
     expect((await req('/admin/credits', { method: 'POST', headers: { cookie: eve.cookie, 'content-type': 'application/x-www-form-urlencoded' }, body: 'days=365' })).status).toBe(303);
   });
 
+  test('an active Profullstack Pass is Automation until it expires, once per pass', async () => {
+    const { grantPass, currentPlan, quote } = await import('../apps/web/src/billing.js');
+    const [u] = await db()`insert into users (email) values (${`pass-${Date.now()}@example.test`}) returning *`;
+    const exp = new Date(Date.now() + 20 * 86400_000);
+    const pass = { active: true, expiresAt: exp };
+    expect(await grantPass(u.id, { sub: 'pass-sub', pass })).not.toBeNull();
+    expect(await grantPass(u.id, { sub: 'pass-sub', pass })).toBeNull();
+    const plan = await currentPlan(u);
+    expect(plan.key).toBe('automation');
+    expect(new Date(plan.paid_through).toISOString()).toBe(exp.toISOString());
+    // A paid month bought during the pass queues after it.
+    expect(new Date((await quote(u, 'automation', 'month')).starts_at).toISOString()).toBe(exp.toISOString());
+    expect(await grantPass(u.id, { sub: 'pass-sub', pass: { active: false, expiresAt: null } })).toBeNull();
+    expect(await grantPass(u.id, { sub: 'x', pass: { active: true, expiresAt: new Date(Date.now() - 1000) } })).toBeNull();
+  });
+
   test('granted days are not money: an upgrade credits none of them, and a paid month queues after them', async () => {
     const { priceQuote } = await import('../apps/web/src/billing.js');
     const now = Date.now();
