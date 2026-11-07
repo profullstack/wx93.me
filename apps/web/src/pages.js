@@ -218,6 +218,7 @@ export function Pricing({ user, plan, paymentsOn }) {
     body: `<section class="narrow wide"><p class="eyebrow">Pricing</p><h1>Pay for clean links, not for links.</h1>
 <p class="lede">Every plan shortens without limits on clicks. Paid plans are prepaid through CoinPay with any major coin or PayPal and never renew by themselves: pay for a month or a year, extend whenever you like.${paymentsOn ? '' : ' <b>Checkout is being switched on; it will be here shortly.</b>'}</p>
 ${planCards({ user, plan })}
+<p class="muted">Deposit $99 in your CoinPay wallet and get a free month: <a href="https://coinpayportal.com/pass">CoinPay Pass</a> (Automation until it ends; sign in with CoinPay).</p>
 <div class="card" id="x402"><h3>Agents with no account: x402</h3>
 <p>An agent can pay per call over <a href="https://x402.org">x402</a>, with no signup and no key. ${money(config.x402.priceCents)} buys a pass good for ${config.x402.passMinutes} minutes and up to ${config.x402.passLinks} links, and every link made with it is ad-free for a year. Over the free allowance the API answers <code>402</code> with the offer; or buy one up front at <a href="/x402">/x402</a>.</p></div>
 </section>`,
