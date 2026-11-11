@@ -76,7 +76,7 @@ const csp = ({ tracker = true } = {}) =>
     `style-src 'self' ${SITE_ORIGIN} 'unsafe-inline'`,
     // FOOTER_SCRIPT_SRC: the footer newsletter form's inline script (hash), which posts to pit.world.
     // The bare interstitial has no footer and stays script-free.
-    tracker ? `script-src 'self' ${CRAWLPROOF} ${SITE_ORIGIN} ${FOOTER_SCRIPT_SRC}` : "script-src 'self'",
+    tracker ? `script-src 'self' ${CRAWLPROOF} https://cdn.jsdelivr.net ${SITE_ORIGIN} ${FOOTER_SCRIPT_SRC}` : "script-src 'self'",
     tracker ? `connect-src 'self' ${CRAWLPROOF} https://pit.world` : "connect-src 'self'",
     `frame-src ${adFrameOrigins({ site: tracker }).join(' ') || "'none'"}`,
     "frame-ancestors 'none'",
