@@ -331,7 +331,7 @@ curl -s ${e(s)}/api/v1/links -H "x-crawl-pass: $(node -p "require('./pass.json')
 <p>Every destination is checked when it is shortened: http and https only, no credentials in the URL, no private addresses, no other shorteners, our blocklist, the URLhaus and OpenPhish feeds (refreshed every few hours and swept over existing links), and Google Safe Browsing where configured. Anonymous links that look like credential phishing need an account. Anyone can <a href="/report">report a link</a>; after ${config.links.reportThreshold} independent reports it is pulled pending review.</p>
 
 <h2 id="privacy">Privacy</h2>
-<p>A click or scan records the time, the referring site's hostname, a country code and city, the device, browser and OS family, whether it came from a QR code, and a visitor key: a hash of the address and browser with a server secret and the day, so unique visitors can be counted without storing who they are or following anyone from one day to the next. The IP address itself is never stored.</p>
+<p>A click or scan records the time, the referring site's hostname, a country code and city, the device, browser and OS family, whether it came from a QR code, and a visitor key: a hash of the address and browser with a server secret and the day, so unique visitors can be counted without storing who they are or following anyone from one day to the next. The IP address itself is never stored. The full <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a> say the rest.</p>
 </section>`,
   });
 }
@@ -982,5 +982,117 @@ ${d.location ? `<p>${e(d.location)}</p>` : ''}${d.description ? `<p class="muted
     bare: true,
     body: `<section class="narrow hosted">${body}
 <p class="tiny muted made">Made with <a href="${e(config.siteUrl)}/qr">wx93 QR codes</a> · <a href="/report">Report</a></p></section>`,
+  });
+}
+
+/* ------------------------------------------------------------------ legal -- */
+
+const LEGAL_CONTACT = 'support@profullstack.com';
+const LEGAL_EFFECTIVE = 'November 11, 2026';
+const OPERATOR = 'Profullstack, Inc., 16375 Bonnie Lane, Los Gatos, CA 95032, USA';
+
+export function Privacy({ user } = {}) {
+  const s = config.siteUrl;
+  return layout({
+    title: 'Privacy Policy',
+    path: '/privacy',
+    description: 'What wx93.me collects, why, who else is involved, and what the MCP server and API can see.',
+    user,
+    body: `<section class="narrow wide docs legal">
+<p class="eyebrow">Legal</p><h1>Privacy Policy</h1>
+<p class="lede">Effective date: ${LEGAL_EFFECTIVE}</p>
+<p>wx93.me ("wx93") is a URL shortener and QR code service operated by ${OPERATOR}. This policy covers the website, the REST API, the hosted MCP server, the CLI, TUI and desktop app, and the short links they create. It describes only what the service actually collects.</p>
+
+<h2>What we collect</h2>
+<p><b>Links and QR codes.</b> For every link: the destination URL and its hostname, the short code or alias, an optional title, expiry and redirect type, the account or API key that made it (if any), and a keyed hash of the address that made it, used for rate limiting and abuse handling. Saved QR codes store their type, content, name, style and an optional logo you upload.</p>
+<p><b>Clicks and scans.</b> A click or scan records the time, the referring site's hostname, a country code and city, the device, browser and OS family, whether it came from a QR code, whether it looks like a bot, and a visitor key: a hash of the address and browser with a server secret and the day, so unique visitors can be counted without storing who they are or following anyone from one day to the next. The IP address itself is never stored. Country and city come from a DB-IP database on our own server; the address is not sent anywhere to look it up.</p>
+<p><b>Accounts.</b> An account is optional. Signing in is a magic link sent to your email address, or a passkey once you add one; there are no passwords. We store your email address, when the account was created and last seen, sessions (with the browser user agent), and for passkeys only the public key and a counter. The sign-up form also asks for the shared Profullstack profile fields (first and last name, company domain, job title, LinkedIn URL); they are stored only after the emailed link proves the address. If you sign in with CoinPay, we store your CoinPay account identifier and the name and email it reports.</p>
+<p><b>Account features.</b> API keys (stored as hashes, with a short prefix so you can tell them apart), OAuth grants for the CLI and MCP clients (stored as hashes), webhook endpoints, their signing secrets and a delivery log, custom domains and their verification tokens, invites and credit codes you redeem.</p>
+<p><b>Payments.</b> Paid plans are prepaid in cryptocurrency through CoinPay (coinpayportal.com). We store the payment reference, amount, currency, status and the plan period it bought, and email you a receipt. Agents can also pay per call with x402 (USDC); for those we keep a fingerprint of the pass, never the pass itself. We never see card or bank details.</p>
+<p><b>Reports.</b> When you report a link we store the reason, any details and email address you choose to give, and a keyed hash of your address so one person counts once.</p>
+
+<h2>Cookies</h2>
+<p>Signed-out visitors get no cookies from wx93 itself. Signing in sets one HttpOnly, SameSite=Lax session cookie. An invite link sets a cookie holding the invite code, and Sign in with CoinPay sets a short-lived cookie for the duration of that sign-in. There are no advertising cookies.</p>
+
+<h2>Who else is involved</h2>
+<ul>
+<li><b>CrawlProof</b> (crawlproof.com): a stats script on regular site pages (aggregate page analytics), and the ad shown on a free link's interstitial page, which is a frame served by crawlproof.com.</li>
+<li><b>Resend</b>: delivers sign-in links, receipts and abuse notices, so it processes your email address.</li>
+<li><b>CoinPay</b>: payment checkout and the optional Sign in with CoinPay.</li>
+<li><b>Abuse checks</b>: destinations are checked against our blocklist and the URLhaus and OpenPhish feeds, which are downloaded to our server, and, where configured, the destination URL is sent to Google Safe Browsing. Nothing about you is sent with it.</li>
+<li><b>Your webhooks</b>: if you add a webhook, link events (including click details listed above) are sent to the URL you choose.</li>
+<li><b>jsDelivr</b> serves the WebMCP script that lets an AI agent in your browser use the public tools.</li>
+</ul>
+<p>Nothing is sold, and no advertising profile is built from you.</p>
+
+<h2>What is public</h2>
+<p>A short link is public to anyone who has it: it redirects to its destination, and adding <code>+</code> to it shows where it goes. Stats, accounts, keys and webhooks are visible only to the account that owns them.</p>
+
+<h2>AI agents and MCP</h2>
+<p>The hosted MCP server is at <code>${e(s)}/mcp</code> (JSON-RPC 2.0, streamable HTTP); the same tools run locally over stdio with <code>npx -y @profullstack/wx93-mcp</code> or <code>wx93 mcp</code>. With no credentials, an MCP client can shorten a URL (as a free link) and expand a wx93 link. With your API key or an OAuth 2.1 access token (sent as a Bearer token), it can act on your account the same way the REST API can: list, read, update and delete your links and QR codes and their stats, bulk shorten, read your plan and usage, redeem credit codes, manage invites and manage webhooks. A tool call is an API call: same quotas, abuse checks and rate limits.</p>
+<p>MCP and API requests are logged (time, tool or route, IP address, and the account or key if any) for abuse prevention and rate limiting. No MCP data is sold or used for advertising.</p>
+
+<h2>Keeping and deleting data</h2>
+<p>Sign-in links expire after 20 minutes. Deleting a link deletes its click history; deleting a QR code deletes it (and, for a dynamic code, its short link). Everything else is kept until you delete it or ask us to. To delete your account and everything attached to it, write to <a href="mailto:${LEGAL_CONTACT}">${LEGAL_CONTACT}</a> from the address on the account.</p>
+
+<h2>Your rights</h2>
+<p>Depending on where you live, you may have the right to access, correct, delete or export your personal data. Contact us to exercise them.</p>
+
+<h2>Children</h2>
+<p>wx93 is not directed at children under 13, and we do not knowingly collect personal information from them.</p>
+
+<h2>Changes</h2>
+<p>If the service starts doing something different, this page changes with it. Material changes will be announced on this page.</p>
+
+<h2>Contact</h2>
+<p>${OPERATOR}. Email <a href="mailto:${LEGAL_CONTACT}">${LEGAL_CONTACT}</a>. See also the <a href="/terms">Terms of Service</a>.</p>
+</section>`,
+  });
+}
+
+export function Terms({ user } = {}) {
+  const s = config.siteUrl;
+  return layout({
+    title: 'Terms of Service',
+    path: '/terms',
+    description: 'The terms for using wx93.me, its API, CLI and MCP server.',
+    user,
+    body: `<section class="narrow wide docs legal">
+<p class="eyebrow">Legal</p><h1>Terms of Service</h1>
+<p class="lede">Effective date: ${LEGAL_EFFECTIVE}</p>
+
+<h2>1. Acceptance of terms</h2>
+<p>By accessing or using wx93.me, its API, CLI, TUI, desktop app or MCP server (the "Service"), you agree to these Terms of Service. If you do not agree, do not use the Service. The Service is operated by ${OPERATOR}.</p>
+
+<h2>2. Use of the Service</h2>
+<p>wx93 shortens URLs, makes QR codes and reports clicks and scans. You may not use it to point at phishing, malware, spam or illegal content, to hide where a link goes in order to deceive, or to shorten links to other shorteners. Links that break these rules can be disabled without notice; see the <a href="/docs#abuse">abuse policy</a>. Please do not send automated traffic heavy enough to degrade the Service for anyone else; the API has rate limits and a documented way to work within them.</p>
+
+<h2>3. Accounts</h2>
+<p>You are responsible for your account, your API keys and OAuth grants, and for all activity under them. An API key can do anything its account can, so keep it secret, and revoke it from your account page if it leaks. Tell us at once about any unauthorized use.</p>
+
+<h2>4. Payments</h2>
+<p>Paid plans are prepaid in cryptocurrency through CoinPay for a month or a year and do not renew by themselves. Agents may pay per call over x402. Prices are shown on the <a href="/pricing">pricing page</a>.</p>
+
+<h2>5. Your content</h2>
+<p>You keep whatever rights you have in the URLs, titles, QR code content and logos you submit, and you confirm you may use them. You give us permission to store, process and serve them as needed to run the Service.</p>
+
+<h2>6. MCP and API use</h2>
+<p>The MCP server at <code>${e(s)}/mcp</code> and the REST API are part of the Service and fall under these terms, including the acceptable use rules above. An agent acting with your key or OAuth token acts on your behalf, and you are responsible for what it does. Do not try to get around quotas, rate limits or abuse checks.</p>
+
+<h2>7. Intellectual property</h2>
+<p>All content, code and trademarks associated with wx93 are the property of Profullstack, Inc. or its licensors. Open-source components are governed by their respective licenses.</p>
+
+<h2>8. Disclaimer of warranties</h2>
+<p>The Service is provided "as is" without warranties of any kind. We do not guarantee that it will be uninterrupted, secure or error-free, or that any link will keep working.</p>
+
+<h2>9. Limitation of liability</h2>
+<p>To the maximum extent permitted by law, Profullstack, Inc. shall not be liable for any indirect, incidental, special, consequential or punitive damages arising out of your use of the Service.</p>
+
+<h2>10. Changes to terms</h2>
+<p>We may update these terms from time to time. Continued use of the Service after a change means you accept the revised terms.</p>
+
+<h2>11. Contact</h2>
+<p>Questions about these terms? Email <a href="mailto:${LEGAL_CONTACT}">${LEGAL_CONTACT}</a>. See also the <a href="/privacy">Privacy Policy</a>.</p>
+</section>`,
   });
 }
