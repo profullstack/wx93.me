@@ -34,6 +34,11 @@ const num = (n) => Number(n ?? 0).toLocaleString('en-US');
 export const CRAWLPROOF_TAG =
   '<script data-site="1db8465f-dde9-47b1-b898-942367b075ad" src="https://crawlproof.com/stats.js" async></script>';
 
+/** WebMCP (@profullstack/webmcp): tools for the AI agent in the visitor's browser. Only the
+ * anonymous MCP tools are bridged (the MCP takes a Bearer key, which a page cannot send). */
+export const WEBMCP_TAG =
+  '<script type="module" data-webmcp src="https://cdn.jsdelivr.net/npm/@profullstack/webmcp@0/src/embed.js" data-mcp="/mcp" data-mcp-exclude="bulk_shorten,list_links,get_link,link_stats,update_link,delete_link,create_qr_code,list_qr_codes,get_qr_code,update_qr_code,delete_qr_code,qr_code_stats,whoami,redeem_credit_code,list_invites,create_invite,list_webhooks,create_webhook,update_webhook,test_webhook,rotate_webhook_secret,delete_webhook,webhook_deliveries" data-pages="{&quot;qr_codes&quot;:&quot;/qr&quot;,&quot;pricing&quot;:&quot;/pricing&quot;,&quot;docs&quot;:&quot;/docs&quot;,&quot;sign_up&quot;:&quot;/signup&quot;}"></script>';
+
 export function layout({ title, description, path, noindex = false, body, user, head = '', bare = false }) {
   const site = config.siteUrl;
   const desc = description ?? 'Short links that work with JavaScript off. Stats, QR codes, custom aliases, and an API, CLI and MCP server for agents.';
@@ -63,6 +68,7 @@ ${path !== undefined ? `<meta property="og:url" content="${e(site)}${e(path)}">`
 <link rel="stylesheet" href="${e(site)}/assets/app.css?v=${CSS_V}">
 ${head}
 ${bare ? '' : CRAWLPROOF_TAG}
+${bare ? '' : WEBMCP_TAG}
 </head>
 <body>
 ${bare ? '' : nav(user)}
