@@ -51,12 +51,16 @@ const refOnly = {
 export const TOOLS = [
   {
     name: 'shorten_url',
+    title: 'Shorten URL',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     description:
       'Shorten a URL with wx93.me and return the short link. Works without an account (free links open through a short ad page for people; bots and previews get the direct redirect). Signed-in Pro and Automation links redirect directly and can have aliases.',
     inputSchema: link,
   },
   {
     name: 'bulk_shorten',
+    title: 'Bulk Shorten URLs',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     description: 'Shorten up to 1,000 URLs in one call (Automation plan). Returns one result per input, in order.',
     inputSchema: {
       type: 'object',
@@ -67,6 +71,8 @@ export const TOOLS = [
   },
   {
     name: 'list_links',
+    title: 'List Links',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: "The account's short links, newest first, with click counts.",
     inputSchema: {
       type: 'object',
@@ -74,9 +80,11 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
-  { name: 'get_link', description: 'One of your links.', inputSchema: refOnly },
+  { name: 'get_link', title: 'Get Link', annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true }, description: 'One of your links.', inputSchema: refOnly },
   {
     name: 'link_stats',
+    title: 'Link Stats',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description:
       'Clicks for one of your links: totals (people, QR scans, unique visitors, bots), and on Pro+ daily counts, referrers, countries, cities, devices, OS, browsers, a weekday-by-hour heatmap, week over week and the latest visits.',
     inputSchema: {
@@ -93,6 +101,8 @@ export const TOOLS = [
   },
   {
     name: 'update_link',
+    title: 'Update Link',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true },
     description: 'Change where one of your links goes, its title, expiry or redirect type.',
     inputSchema: {
       type: 'object',
@@ -107,14 +117,18 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
-  { name: 'delete_link', description: 'Delete one of your links. It stops resolving at once.', inputSchema: refOnly },
+  { name: 'delete_link', title: 'Delete Link', annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true }, description: 'Delete one of your links. It stops resolving at once.', inputSchema: refOnly },
   {
     name: 'expand_link',
+    title: 'Expand Short Link',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: 'Where a wx93.me short link goes, without following it.',
     inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false },
   },
   {
     name: 'create_qr_code',
+    title: 'Create QR Code',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     description:
       'Save a styled QR code to the account and return it with a PNG preview. Dynamic types (url, vcard, event, links) encode a wx93 short link: scans are counted and the content can change after printing (vcard, event and links get a hosted page). Static types (text, wifi, email, phone, sms, whatsapp, geo, crypto) carry their content directly. Data keys per type: url {url}; vcard {first, last?, org?, title?, phone?, email?, url?, address?, note?}; event {title, start, end?, tz?, location?, description?, url?}; links {title, description?, links: "Label | https://… per line"}; text {text}; wifi {ssid, password?, encryption? WPA|WEP|nopass, hidden?}; email {to, subject?, body?}; phone {number}; sms {number, message?}; whatsapp {number, message?}; geo {lat, lng, label?}; crypto {coin, address, amount?, label?}.',
     inputSchema: {
@@ -133,6 +147,8 @@ export const TOOLS = [
   },
   {
     name: 'list_qr_codes',
+    title: 'List QR Codes',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: "The account's saved QR codes, newest first, with what each encodes and its scan count.",
     inputSchema: {
       type: 'object',
@@ -142,11 +158,15 @@ export const TOOLS = [
   },
   {
     name: 'get_qr_code',
+    title: 'Get QR Code',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: 'One saved QR code, with the image as PNG and links to SVG and print-ready PDF.',
     inputSchema: { type: 'object', properties: { id: qrId, size: { type: 'integer', minimum: 64, maximum: 2048 } }, required: ['id'], additionalProperties: false },
   },
   {
     name: 'update_qr_code',
+    title: 'Update QR Code',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true },
     description: "Change a saved code's name, content (merged into its data) or style. A dynamic code keeps working after printing; a static one changes its picture.",
     inputSchema: {
       type: 'object',
@@ -155,9 +175,11 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
-  { name: 'delete_qr_code', description: 'Delete a saved QR code (and, for a dynamic one, its short link).', inputSchema: { type: 'object', properties: { id: qrId }, required: ['id'], additionalProperties: false } },
+  { name: 'delete_qr_code', title: 'Delete QR Code', annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true }, description: 'Delete a saved QR code (and, for a dynamic one, its short link).', inputSchema: { type: 'object', properties: { id: qrId }, required: ['id'], additionalProperties: false } },
   {
     name: 'qr_code_stats',
+    title: 'QR Code Stats',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description:
       'Scans of a dynamic QR code: people, unique visitors, bots; on Pro+ daily series, countries, cities, devices, OS, browsers, a weekday-by-hour heatmap, week over week, the last hour and the latest scans.',
     inputSchema: {
@@ -172,25 +194,33 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
-  { name: 'whoami', description: 'The signed-in account, its plan and this month\'s usage.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'whoami', title: 'Who Am I', annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true }, description: 'The signed-in account, its plan and this month\'s usage.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   {
     name: 'redeem_credit_code',
+    title: 'Redeem Credit Code',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     description: 'Redeem a wx93 credit code (CR-XXXX-XXXX-XXXX-XXXX) on the signed-in account. It adds days of the Pro plan.',
     inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false },
   },
   {
     name: 'list_invites',
+    title: 'List Invites',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: 'The signed-in account\'s invite links: how many are left (3 per account) and which were used.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'create_invite',
+    title: 'Create Invite',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     description: 'Make one invite link (single use, 30 days). A new account that signs up through it gets a week of Pro, and so does the inviter. The link is shown once.',
     inputSchema: { type: 'object', properties: { note: { type: 'string', description: 'Who it is for; only the inviter sees it.' } }, additionalProperties: false },
   },
-  { name: 'list_webhooks', description: 'Your webhook endpoints and the event types wx93 sends (link.created, link.clicked).', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'list_webhooks', title: 'List Webhooks', annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true }, description: 'Your webhook endpoints and the event types wx93 sends (link.created, link.clicked).', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   {
     name: 'create_webhook',
+    title: 'Create Webhook',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     description:
       'Have wx93 POST link events to an https URL (Automation plan): link.created when a link is made, link.clicked on every human click. Deliveries are signed CloudEvents (Standard Webhooks headers, plus x-wx93-signature). Returns the signing secret once. events: link.created, link.clicked, link.* or *; omit for all.',
     inputSchema: {
@@ -206,6 +236,8 @@ export const TOOLS = [
   },
   {
     name: 'update_webhook',
+    title: 'Update Webhook',
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true },
     description: 'Change a webhook endpoint: url, events, description, or enabled (true turns a switched-off endpoint back on).',
     inputSchema: {
       type: 'object',
@@ -214,11 +246,13 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
-  { name: 'test_webhook', description: 'Send a webhook.test event to an endpoint now and say how it went.', inputSchema: idOnly },
-  { name: 'rotate_webhook_secret', description: 'Replace an endpoint\'s signing secret. Returns the new one; the old one stops working at once.', inputSchema: idOnly },
-  { name: 'delete_webhook', description: 'Remove a webhook endpoint.', inputSchema: idOnly },
+  { name: 'test_webhook', title: 'Send Test Webhook', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, description: 'Send a webhook.test event to an endpoint now and say how it went.', inputSchema: idOnly },
+  { name: 'rotate_webhook_secret', title: 'Rotate Webhook Secret', annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }, description: 'Replace an endpoint\'s signing secret. Returns the new one; the old one stops working at once.', inputSchema: idOnly },
+  { name: 'delete_webhook', title: 'Delete Webhook', annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true }, description: 'Remove a webhook endpoint.', inputSchema: idOnly },
   {
     name: 'webhook_deliveries',
+    title: 'Webhook Deliveries',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     description: 'Recent webhook deliveries with their payloads and results, for one endpoint or all of them.',
     inputSchema: { type: 'object', properties: { id: hookId, limit: { type: 'integer', minimum: 1, maximum: 200 } }, additionalProperties: false },
   },
