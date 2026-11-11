@@ -89,8 +89,21 @@ d('anonymous links and how they answer', () => {
     expect(html).not.toContain('crawlproof');
     expect(res.headers.get('content-security-policy')).not.toContain('crawlproof.com');
   });
+  test('legal pages answer with their headings, and the footer links them', async () => {
+    for (const [path, heading] of [['/privacy', 'Privacy Policy'], ['/terms', 'Terms of Service']]) {
+      const res = await req(path);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain(`<h1>${heading}</h1>`);
+      expect(html).toContain(`<title>${heading}`);
+      expect(html).not.toContain('class="ad ');
+    }
+    const home = await (await req('/')).text();
+    expect(home).toContain('href="/privacy"');
+    expect(home).toContain('href="/terms"');
+  });
   test('site pages carry the CrawlProof stats tag, and the CSP allows it', async () => {
-    for (const path of ['/', '/pricing', '/docs']) {
+    for (const path of ['/', '/pricing', '/docs', '/privacy', '/terms']) {
       const res = await req(path);
       expect(res.status).toBe(200);
       expect(await res.text()).toContain('data-site="1db8465f-dde9-47b1-b898-942367b075ad" src="https://crawlproof.com/stats.js"');

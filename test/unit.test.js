@@ -229,6 +229,18 @@ describe('MCP', () => {
 });
 
 describe('copy', () => {
+  test('legal pages render with their headings and no ad', async () => {
+    const P = await import('../apps/web/src/pages.js');
+    const priv = P.Privacy({});
+    const terms = P.Terms({});
+    expect(priv).toContain('<h1>Privacy Policy</h1>');
+    expect(priv).toContain('/mcp');
+    expect(terms).toContain('<h1>Terms of Service</h1>');
+    for (const html of [priv, terms]) {
+      expect(html).not.toMatch(/[\u2013\u2014]/);
+      expect(html).not.toContain('class="ad ');
+    }
+  });
   test('no em dashes anywhere a person reads', async () => {
     for (const f of ['apps/web/src/pages.js', 'apps/web/src/app.js', 'README.md', 'packages/cli/src/cli.js', 'apps/web/src/install.sh.txt']) {
       const text = await Bun.file(join(import.meta.dir, '..', f)).text();

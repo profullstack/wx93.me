@@ -340,6 +340,8 @@ app.get('/pricing', async (c) => {
   );
 });
 app.get('/docs', async (c) => c.html(P.Docs({ user: (await caller(c)).user })));
+app.get('/privacy', async (c) => c.html(P.Privacy({ user: (await caller(c)).user })));
+app.get('/terms', async (c) => c.html(P.Terms({ user: (await caller(c)).user })));
 app.get('/desktop', async (c) => c.html(P.Desktop({ user: (await caller(c)).user })));
 app.get('/offline', (c) => c.html(P.Offline()));
 const SIGNIN_ERRORS = {
@@ -1737,6 +1739,8 @@ const STATIC_PAGES = [
   ['/desktop', 'monthly', '0.5'],
   ['/signup', 'monthly', '0.5'],
   ['/report', 'monthly', '0.3'],
+  ['/privacy', 'yearly', '0.2'],
+  ['/terms', 'yearly', '0.2'],
 ];
 const BUILT = new Date().toISOString().slice(0, 10);
 app.get('/sitemap.xml', (c) =>
