@@ -18,7 +18,7 @@
     "@profullstack/watchdog": "^0.3.0",
     "@profullstack/webhooks": "0.2.1",
     "@profullstack/wx93": "workspace:*",
-    "@profullstack/x402-gateway": "^0.13.1",
+    "@profullstack/x402-gateway": "^0.18.1",
     "@resvg/resvg-wasm": "2.6.2",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.0.3",
