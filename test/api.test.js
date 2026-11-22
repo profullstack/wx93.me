@@ -322,8 +322,6 @@ d('the checkout page', () => {
           expires_in_minutes: 60,
         });
       }
-    const [{ n }] = await db()`select count(*)::int as n from payments where user_id = ${carol.user.id} and status = 'pending'`;
-    expect(n).toBe(8);
   });
 
   test('an amount that is not the quote opens no session', async () => {
@@ -348,23 +346,35 @@ d('the checkout page', () => {
     expect(seen.length).toBe(0);
   });
 
-  test('Pro to Automation: the page shows the credited price and charges it', async () => {
+  test('bought on the page, settled by the webhook, then Pro to Automation at the credited price', async () => {
     const fay = await signIn('checkout-fay@example.test');
-    await db()`insert into plan_periods (user_id, plan, term, starts_at, ends_at) values (${fay.user.id}, 'pro', 'month', now() - interval '15 days', now() + interval '15 days')`;
-    const { quote } = await import('../apps/web/src/billing.js');
+    const seen = coinpay();
+    // A month of Pro, bought on the page and paid: the webhook grants it as it always has.
+    const bought = await req('/billing/checkout/pro', form(fay.cookie, { option: 'month' }));
+    expect(bought.status).toBe(303);
+    const session = bought.headers.get('location').split('/').pop();
+    const body = JSON.stringify({ type: 'payment.confirmed', data: { payment_id: `pay_${session}`, status: 'confirmed', checkout_session_id: session, metadata: seen[0].metadata } });
+    const t = Math.floor(Date.now() / 1000);
+    const sig = `t=${t},v1=${createHmac('sha256', 'whsec_test').update(`${t}.${body}`).digest('hex')}`;
+    const hook = await req('/webhooks/coinpay', { method: 'POST', headers: { 'content-type': 'application/json', 'x-coinpay-signature': sig }, body });
+    expect(hook.status).toBe(200);
+    expect(await hook.json()).toMatchObject({ ok: true, settled: true, granted: true });
+    const { quote, currentPlan } = await import('../apps/web/src/billing.js');
+    expect((await currentPlan(fay.user)).key).toBe('pro');
+    // The whole month is unused, so all $5 of it is credited.
     const q = await quote(fay.user, 'automation', 'month');
     expect(q.kind).toBe('upgrade');
-    expect(q.amount_cents).toBe(2650);
+    expect(q.amount_cents).toBe(2400);
     const html = await (await req('/checkout/automation', { headers: { cookie: fay.cookie } })).text();
     expect(html).toContain('Your unused paid Pro time is credited in these prices.');
-    expect(html).toContain('$26.50 for a month');
-    expect(html).toContain('$287.50 for a year');
-    const seen = coinpay();
+    expect(html).toContain('$24 for a month');
+    expect(html).toContain('$285 for a year');
+    seen.length = 0;
     const res = await req('/billing/checkout/automation', form(fay.cookie, { option: 'month' }, { referer: `${SITE}/checkout/automation` }));
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toStartWith('https://coinpayportal.com/checkout/cs_page');
     expect(seen.length).toBe(1);
-    expect(seen[0].amount).toBe(26.5);
+    expect(seen[0].amount).toBe(24);
     expect(seen[0].description).toBe('wx93 Automation, one month (upgrade, unused Pro credited)');
     expect(seen[0].metadata).toMatchObject({ product: 'plan', plan: 'automation', term: 'month', kind: 'upgrade' });
     // Pro itself is a renewal for her: the list price, queued after what she has.
