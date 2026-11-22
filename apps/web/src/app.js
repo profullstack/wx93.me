@@ -21,6 +21,7 @@ import { adFrameOrigins } from './ads.js';
 import * as auth from './auth.js';
 import { applyPurchase, billingState, currentPlan, grantPass, quote } from './billing.js';
 import { aliasProblem, CODE_PATH } from './codes.js';
+import { CHECKOUT_ASSETS, planCheckout, planOptions, TIERS } from './checkout.js';
 import * as K from './credits.js';
 import * as CP from './coinpay.js';
 import { config, PLANS } from './config.js';
@@ -286,6 +287,9 @@ app.get('/icons/:name{[a-z0-9-]+\\.png}', (c) => {
     return c.notFound();
   }
 });
+// The checkout page's stylesheet and script (@profullstack/checkout), from our own origin.
+for (const [path, a] of Object.entries(CHECKOUT_ASSETS))
+  app.get(path, (c) => c.body(a.body, 200, { 'content-type': a.type, 'cache-control': 'public, max-age=3600' }));
 const WEBAUTHN_JS = [join(here, '..', 'node_modules'), join(here, '..', '..', '..', 'node_modules')]
   .map((d) => join(d, '@simplewebauthn/browser/dist/bundle/index.umd.min.js'))
   .map((p) => {
@@ -1498,13 +1502,20 @@ app.get('/p/:file{[0-9a-f-]{36}(\\.(vcf|ics))?}', async (c) => {
 
 /* ------------------------------------------------------------------ money -- */
 
-async function startCheckout(user, { plan, term }) {
+/**
+ * Open a CoinPay session for a plan and a term. `expectCents` is the amount the
+ * checkout page showed: when it is given and is not what would be charged, no
+ * session is opened. The API route gives none and is charged the quote, as ever.
+ */
+export async function startCheckout(user, { plan, term, expectCents = null }) {
   if (!pay.paymentsEnabled()) throw new HttpError(503, 'payments are being switched on; try again shortly');
   if (!PLANS[plan] || plan === 'free') throw new HttpError(400, 'plan is pro or automation');
   if (!['month', 'year'].includes(term)) throw new HttpError(400, 'term is month or year');
   const q = await quote(user, plan, term);
   if (q.kind === 'staff') throw new HttpError(400, 'staff accounts are never billed');
   if (q.amount_cents < 50) throw new HttpError(400, 'nothing to pay: your current plan already covers that');
+  if (expectCents !== null && q.amount_cents !== expectCents)
+    throw new Error(`checkout amount changed: the page showed ${expectCents} cents, the quote is ${q.amount_cents}`);
   // A CoinPay hosted checkout session: the buyer picks any coin or PayPal there.
   const { checkoutUrl, paymentRef } = await pay.createCheckout({
     user,
@@ -1519,17 +1530,75 @@ async function startCheckout(user, { plan, term }) {
   return { checkout_url: checkoutUrl, payment_ref: paymentRef, quote: q };
 }
 
-app.post('/billing/checkout', async (c) => {
+/**
+ * The checkout page for one tier, as this request's account would be charged.
+ * `state` says why there is no page to show when there is none.
+ */
+async function tierCheckout(c, tier) {
   const user = await sessionUser(c);
-  if (!user) return c.redirect('/signin?next=/pricing', 303);
-  const f = await c.req.parseBody();
-  try {
-    const r = await startCheckout(user, { plan: String(f.plan), term: String(f.term || 'month') });
-    return c.redirect(r.checkout_url, 303);
-  } catch (err) {
-    if (!(err instanceof HttpError)) console.error('[checkout]', err);
-    return c.html(P.Gone({ title: 'Checkout did not start', message: err instanceof HttpError ? err.message : 'CoinPay did not answer. Try again in a minute.', status: 502, user }), 502);
+  const amounts = {};
+  let credited = false;
+  let state = 'ok';
+  if (user) {
+    for (const term of ['month', 'year']) {
+      const q = await quote(user, tier, term);
+      if (q.kind === 'staff') state = 'staff';
+      amounts[term] = q.amount_cents;
+      if (q.credit_cents > 0) credited = true;
+    }
+    if (state === 'ok' && !pay.paymentsEnabled()) state = 'off';
+    if (state === 'ok' && !planOptions(tier, amounts).length) state = 'covered';
   }
+  if (state !== 'ok') return { user, state, checkout: null };
+  const plan = user ? await currentPlan(user) : null;
+  const checkout = planCheckout({
+    tier,
+    user,
+    email: user && !CP.isPlaceholderEmail(user.email) ? user.email : '',
+    amounts: user ? amounts : undefined,
+    extend: plan?.key === tier,
+    credited,
+    start: startCheckout,
+    onError: (err) => {
+      if (!(err instanceof HttpError)) console.error('[checkout]', err);
+    },
+  });
+  return { user, state, checkout };
+}
+
+const NO_CHECKOUT = {
+  off: [503, 'payments are being switched on; try again shortly'],
+  staff: [400, 'staff accounts are never billed'],
+  covered: [400, 'nothing to pay: your current plan already covers that'],
+};
+
+app.get(`/checkout/:tier{${TIERS.join('|')}}`, async (c) => {
+  const tier = c.req.param('tier');
+  const { user, state, checkout } = await tierCheckout(c, tier);
+  const u = new URL(c.req.url);
+  if (!user) return c.redirect(`/signin?next=${encodeURIComponent(`${u.pathname}${u.search}`)}`, 302);
+  const headers = { 'cache-control': 'private, no-store' };
+  if (!checkout) {
+    const [status, message] = NO_CHECKOUT[state];
+    return c.html(P.Gone({ title: 'Checkout did not start', message, status, user }), status, headers);
+  }
+  const account = { email: CP.isPlaceholderEmail(user.email) ? '' : user.email };
+  return c.html(P.Checkout({ user, name: PLANS[tier].name, form: checkout.html({ query: u.searchParams, account }) }), 200, headers);
+});
+
+app.post(`/billing/checkout/:tier{${TIERS.join('|')}}`, async (c) => {
+  const tier = c.req.param('tier');
+  const { state, checkout } = await tierCheckout(c, tier);
+  // Nothing to sell this account: the page says why.
+  if (!checkout) return c.redirect(`/checkout/${tier}`, 303);
+  return checkout.POST(c.req.raw);
+});
+
+// The plan picker that used to post here is gone; a page still open from before lands on the checkout page.
+app.post('/billing/checkout', async (c) => {
+  const f = await c.req.parseBody();
+  if (!TIERS.includes(String(f.plan))) return c.redirect('/pricing', 303);
+  return c.redirect(`/checkout/${f.plan}?plan=${f.term === 'month' ? 'month' : 'year'}`, 303);
 });
 app.post('/api/v1/billing/checkout', async (c) => {
   try {
