@@ -219,6 +219,169 @@ d('accounts, plans and money', () => {
   });
 });
 
+d('the checkout page', () => {
+  const realFetch = globalThis.fetch;
+  /** Stand in for CoinPay and keep what it was sent. */
+  const coinpay = () => {
+    const seen = [];
+    let n = 0;
+    globalThis.fetch = async (url, init) => {
+      if (!String(url).includes('/api/checkout/sessions')) return realFetch(url, init);
+      const id = `cs_page${Date.now()}${++n}`;
+      seen.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ id, url: `https://coinpayportal.com/checkout/${id}` }), { status: 201, headers: { 'content-type': 'application/json' } });
+    };
+    return seen;
+  };
+  const form = (cookie, fields, headers = {}) => ({
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', origin: SITE, referer: `${SITE}/checkout/pro`, ...(cookie ? { cookie } : {}), ...headers },
+    body: new URLSearchParams(fields).toString(),
+  });
+  afterAll(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test('signed out: the page and the post both go to sign-in, and the pricing buttons point at the page', async () => {
+    const page = await req('/checkout/pro?plan=month');
+    expect(page.status).toBe(302);
+    expect(page.headers.get('location')).toBe(`/signin?next=${encodeURIComponent('/checkout/pro?plan=month')}`);
+    const posted = await req('/billing/checkout/pro', form(null, { option: 'month' }));
+    expect(posted.status).toBe(303);
+    expect(posted.headers.get('location')).toBe(`/signin?next=${encodeURIComponent('/checkout/pro?option=month')}`);
+    expect((await req('/checkout/free')).status).toBe(404);
+    const pricing = await (await req('/pricing')).text();
+    expect(pricing).toContain('href="/signup?next=/checkout/pro"');
+    expect(pricing).toContain('href="/signup?next=/checkout/automation"');
+    expect(pricing).not.toContain('action="/billing/checkout"');
+  });
+
+  test('signed in: one page per tier, the year preselected, no inline script or style', async () => {
+    const bob = await signIn('checkout-bob@example.test');
+    const pricing = await (await req('/pricing', { headers: { cookie: bob.cookie } })).text();
+    expect(pricing).toContain('<a class="btn primary" href="/checkout/pro">Get Pro</a>');
+    expect(pricing).toContain('<a class="btn primary" href="/checkout/automation">Get Automation</a>');
+    const res = await req('/checkout/pro', { headers: { cookie: bob.cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toContain('no-store');
+    const html = await res.text();
+    expect(html).toContain('action="/billing/checkout/pro"');
+    expect(html).toContain('name="option" value="year" checked');
+    expect(html).toContain('Buying as <strong>checkout-bob@example.test</strong>');
+    expect(html).toContain('USD 50.00');
+    expect(html).toContain('$5 for a month');
+    expect(html).toMatch(/<link rel="stylesheet" href="\/assets\/checkout\.css\?v=[0-9a-f]+">/);
+    expect(html).toMatch(/<script type="module" src="\/assets\/checkout\.js\?v=[0-9a-f]+"><\/script>/);
+    const section = html.slice(html.indexOf('<section class="pfc"'), html.indexOf('</section>'));
+    expect(section).toContain('Continue to payment');
+    expect(section).not.toContain('<script');
+    expect(section).not.toContain('<style');
+    expect(section).not.toContain(' style=');
+    const month = await (await req('/checkout/automation?plan=month', { headers: { cookie: bob.cookie } })).text();
+    expect(month).toContain('name="option" value="month" checked');
+    expect(month).toContain('USD 29.00');
+    for (const [path, type] of [['/assets/checkout.css', 'text/css'], ['/assets/checkout.js', 'text/javascript']]) {
+      const asset = await req(path);
+      expect(asset.status).toBe(200);
+      expect(asset.headers.get('content-type')).toContain(type);
+    }
+    // A pricing page left open from before the checkout page existed.
+    const old = await req('/billing/checkout', form(bob.cookie, { plan: 'automation', term: 'month' }));
+    expect(old.status).toBe(303);
+    expect(old.headers.get('location')).toBe('/checkout/automation?plan=month');
+  });
+
+  test('the page opens exactly the session the API opens, for every tier and term', async () => {
+    const carol = await signIn('checkout-carol@example.test');
+    const seen = coinpay();
+    const prices = { pro: { month: 5, year: 50 }, automation: { month: 29, year: 290 } };
+    for (const plan of ['pro', 'automation'])
+      for (const term of ['month', 'year']) {
+        seen.length = 0;
+        const api = await req('/api/v1/billing/checkout', { method: 'POST', headers: { cookie: carol.cookie }, json: { plan, term } });
+        expect(api.status).toBe(200);
+        const answer = await api.json();
+        expect(answer.checkout_url).toStartWith('https://coinpayportal.com/checkout/cs_page');
+        expect(answer.payment_ref).toStartWith('cs_page');
+        expect(answer.quote.amount_cents).toBe(prices[plan][term] * 100);
+        const page = await req(`/billing/checkout/${plan}`, form(carol.cookie, { option: term, email: 'not-carol@example.test' }));
+        expect(page.status).toBe(303);
+        expect(page.headers.get('location')).toStartWith('https://coinpayportal.com/checkout/cs_page');
+        expect(seen.length).toBe(2);
+        expect(seen[1]).toEqual(seen[0]);
+        expect(seen[1]).toEqual({
+          amount: prices[plan][term],
+          currency: 'USD',
+          description: `wx93 ${plan === 'pro' ? 'Pro' : 'Automation'}, one ${term}`,
+          customer_email: 'checkout-carol@example.test',
+          account_id: String(carol.user.id),
+          property: 'localhost',
+          metadata: { product: 'plan', plan, term, kind: 'new', user_id: String(carol.user.id), email: 'checkout-carol@example.test', property: 'localhost' },
+          success_url: `${SITE}/account?paid=1`,
+          cancel_url: `${SITE}/pricing`,
+          expires_in_minutes: 60,
+        });
+      }
+    const [{ n }] = await db()`select count(*)::int as n from payments where user_id = ${carol.user.id} and status = 'pending'`;
+    expect(n).toBe(8);
+  });
+
+  test('an amount that is not the quote opens no session', async () => {
+    const { startCheckout } = await import('../apps/web/src/app.js');
+    const dave = await signIn('checkout-dave@example.test');
+    const seen = coinpay();
+    await expect(startCheckout(dave.user, { plan: 'pro', term: 'month', expectCents: 499 })).rejects.toThrow('checkout amount changed');
+    await expect(startCheckout(dave.user, { plan: 'pro', term: 'year', expectCents: 500 })).rejects.toThrow('checkout amount changed');
+    expect(seen.length).toBe(0);
+    expect((await startCheckout(dave.user, { plan: 'pro', term: 'month', expectCents: 500 })).quote.amount_cents).toBe(500);
+    expect(seen.length).toBe(1);
+  });
+
+  test('a foreign Origin is refused, with a session or without', async () => {
+    const erin = await signIn('checkout-erin@example.test');
+    const seen = coinpay();
+    const withCookie = await req('/billing/checkout/pro', form(erin.cookie, { option: 'year' }, { origin: 'https://evil.example' }));
+    expect(withCookie.status).toBe(403);
+    const without = await req('/billing/checkout/pro', form(null, { option: 'year' }, { origin: 'https://evil.example' }));
+    expect(without.status).toBe(303);
+    expect(without.headers.get('location')).toContain('error=bad_origin');
+    expect(seen.length).toBe(0);
+  });
+
+  test('Pro to Automation: the page shows the credited price and charges it', async () => {
+    const fay = await signIn('checkout-fay@example.test');
+    await db()`insert into plan_periods (user_id, plan, term, starts_at, ends_at) values (${fay.user.id}, 'pro', 'month', now() - interval '15 days', now() + interval '15 days')`;
+    const { quote } = await import('../apps/web/src/billing.js');
+    const q = await quote(fay.user, 'automation', 'month');
+    expect(q.kind).toBe('upgrade');
+    expect(q.amount_cents).toBe(2650);
+    const html = await (await req('/checkout/automation', { headers: { cookie: fay.cookie } })).text();
+    expect(html).toContain('Your unused paid Pro time is credited in these prices.');
+    expect(html).toContain('$26.50 for a month');
+    expect(html).toContain('$287.50 for a year');
+    const seen = coinpay();
+    const res = await req('/billing/checkout/automation', form(fay.cookie, { option: 'month' }, { referer: `${SITE}/checkout/automation` }));
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toStartWith('https://coinpayportal.com/checkout/cs_page');
+    expect(seen.length).toBe(1);
+    expect(seen[0].amount).toBe(26.5);
+    expect(seen[0].description).toBe('wx93 Automation, one month (upgrade, unused Pro credited)');
+    expect(seen[0].metadata).toMatchObject({ product: 'plan', plan: 'automation', term: 'month', kind: 'upgrade' });
+    // Pro itself is a renewal for her: the list price, queued after what she has.
+    expect(await (await req('/checkout/pro', { headers: { cookie: fay.cookie } })).text()).toContain('Extend Pro');
+  });
+
+  test('staff are told why there is nothing to buy', async () => {
+    const staff = await signIn('staff@example.test');
+    const res = await req('/checkout/pro', { headers: { cookie: staff.cookie } });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('staff accounts are never billed');
+    const posted = await req('/billing/checkout/pro', form(staff.cookie, { option: 'year' }));
+    expect(posted.status).toBe(303);
+    expect(posted.headers.get('location')).toBe('/checkout/pro');
+  });
+});
+
 d('OAuth 2.1 for the CLI', () => {
   test('authorization code + PKCE, then a rotating refresh', async () => {
     const { cookie } = await signIn('bob@example.test');

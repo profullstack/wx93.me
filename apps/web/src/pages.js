@@ -1,6 +1,7 @@
 import { COLUMNS as PROFILE_COLUMNS, renderProfileFields } from '@profullstack/profile';
 import { adNetworkMeta, renderAd } from './ads.js';
 import { ringFooter } from './ring-footer.js';
+import { CHECKOUT_ASSETS } from './checkout.js';
 import { config, PLANS } from './config.js';
 import { DEFAULT_STYLE, DOTS, ECC, EYES, layoutQr, parseStyle, renderSvg } from './qr.js';
 import { QR_TYPES } from './qr-types.js';
@@ -173,11 +174,8 @@ export function planCards({ compact = false, user, plan } = {}) {
           ? ''
           : `<a class="btn" href="/signup">Sign up free</a>`
         : user
-          ? `<form method="post" action="/billing/checkout" class="buy">
-              <input type="hidden" name="plan" value="${key}">
-              <select name="term" aria-label="Term"><option value="month">${money(p.monthCents)} for a month</option><option value="year">${money(p.yearCents)} for a year</option></select>
-              <button class="btn primary">${current ? 'Extend' : `Get ${p.name}`}</button></form>`
-          : `<a class="btn primary" href="/signup?next=/pricing">Get ${p.name}</a>`;
+          ? `<a class="btn primary" href="/checkout/${key}">${current ? 'Extend' : `Get ${p.name}`}</a>`
+          : `<a class="btn primary" href="/signup?next=/checkout/${key}">Get ${p.name}</a>`;
     return `<div class="card plan${key === 'pro' ? ' featured' : ''}${current ? ' current' : ''}">
 <h3>${p.name}${current ? ' <span class="pill">your plan</span>' : ''}</h3>
 <p class="price">${key === 'free' ? '$0' : `${money(p.monthCents)}<small>/month</small>`}</p>
@@ -213,6 +211,19 @@ ${card('automation', 'For agents and businesses running links at volume.', [
   'Built for the API, CLI, MCP, PWA and desktop together',
 ])}
 </div>`;
+}
+
+/** The checkout page: `form` is the markup from @profullstack/checkout, already escaped. It works as a plain form post. */
+export function Checkout({ user, name, form }) {
+  const a = CHECKOUT_ASSETS;
+  return layout({
+    title: `Get ${name}`,
+    noindex: true,
+    user,
+    head: `<link rel="stylesheet" href="/assets/checkout.css?v=${a['/assets/checkout.css'].v}">`,
+    body: `${form}
+<script type="module" src="/assets/checkout.js?v=${a['/assets/checkout.js'].v}"></script>`,
+  });
 }
 
 export function Pricing({ user, plan, paymentsOn }) {

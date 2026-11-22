@@ -44,7 +44,8 @@ pre.code{background:var(--bg2);border:1px solid var(--line);border-radius:12px;p
 .price.small{font-size:30px;font-weight:800;margin:.2em 0}.price.small small{font-size:15px;color:var(--muted);font-weight:500}
 .plan.featured{border-color:var(--accent)}.plan.current{box-shadow:0 0 0 2px var(--accent2) inset}
 .plan ul{padding-left:18px;color:#c9d2da}.plan li{margin:4px 0}
-.buy{display:flex;flex-wrap:wrap;gap:8px}.buy select{flex:1 1 140px}
+/* The checkout page (@profullstack/checkout), in this site's colours. */
+.pfc{--pfc-accent:var(--accent);--pfc-accent-fg:#0b0d10;--pfc-fg:var(--fg);--pfc-muted:var(--muted);--pfc-card:var(--card);--pfc-border:var(--line);--pfc-error:var(--bad);--pfc-save-bg:var(--bg2);--pfc-save-fg:var(--accent);--pfc-popular-bg:var(--bg2);--pfc-popular-fg:var(--accent2);--pfc-radius:10px}
 .pill{display:inline-block;font:600 12px var(--mono);padding:2px 8px;border-radius:999px;background:var(--bg2);border:1px solid var(--accent2);color:var(--accent2);vertical-align:middle}.pill.bad{border-color:var(--bad);color:var(--bad)}
 .shorturl{font-family:var(--mono);font-size:clamp(28px,5vw,46px);word-break:break-all}.shorturl a{color:var(--accent)}
 .copyfield{flex:1 1 300px;font-family:var(--mono)}
