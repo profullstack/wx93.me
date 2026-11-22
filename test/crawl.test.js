@@ -51,3 +51,8 @@ test('a browser reads the home page', async () => {
   });
   expect(res.status).toBe(200);
 });
+
+test('a forged session cookie does not exempt GPTBot (x402-gateway 0.18.3 sessionCookie)', async () => {
+  const res = await app.request('https://wx93.me/', { headers: { 'user-agent': GPTBOT, cookie: 'wx93_session=forged' } });
+  expect(res.status).toBe(402);
+});
